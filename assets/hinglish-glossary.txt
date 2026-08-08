@@ -1,0 +1,232 @@
+# Hinglish glossary
+#
+# Two kinds of entry:
+#
+#   <source phrase> => <english phrase>    MAP: Devanagari-written English back to
+#                                          its real English spelling
+#   <english phrase>                       PROTECT: never let any backend alter it
+#
+# WHY MAPPINGS ARE NEEDED
+# ASR frequently writes English words in Devanagari when the surrounding speech
+# is Hindi: "cheat day" comes back as "चीट डे". Phonetic transliteration then
+# produces "cheet de" — correct rules, lossy input. Nothing but a mapping can
+# recover the English spelling, because चीट could equally be cheet/chit/cheat.
+#
+# RULE: both sides must have the SAME number of tokens, so each output word keeps
+# the timestamp of the word it replaced. The loader rejects mismatches.
+#
+# This list is deliberately incomplete and is expected to grow with your content.
+# Add entries as you hit them; --hinglish-glossary <file> merges your own on top.
+
+# ---------------------------------------------------------------------------
+# Food / fitness / lifestyle — the "cheat day" family
+# ---------------------------------------------------------------------------
+चीट डे => cheat day
+चीट डेज => cheat days
+चीट मील => cheat meal
+डाइट => diet
+डायट => diet
+डाइटिंग => dieting
+वर्कआउट => workout
+वर्क आउट => work out
+जिम => gym
+जिम्म => gym
+प्रोटीन => protein
+कैलोरी => calories
+फिटनेस => fitness
+हेल्दी => healthy
+वेट => weight
+वेट लॉस => weight loss
+ब्रेकफास्ट => breakfast
+लंच => lunch
+डिनर => dinner
+स्नैक => snack
+
+# ---------------------------------------------------------------------------
+# Work / business
+# ---------------------------------------------------------------------------
+मीटिंग => meeting
+मीटिंग्स => meetings
+इंपोर्टेंट => important
+इम्पोर्टेंट => important
+प्रोजेक्ट => project
+प्रोजेक्ट्स => projects
+ऑफिस => office
+ऑफ़िस => office
+बिजनेस => business
+बिज़नेस => business
+कंपनी => company
+क्लाइंट => client
+टीम => team
+मार्केट => market
+मार्केटिंग => marketing
+सेल्स => sales
+प्रोडक्ट => product
+सर्विस => service
+स्टार्ट => start
+स्टार्टअप => startup
+अपडेट => update
+रिपोर्ट => report
+डेडलाइन => deadline
+प्रेजेंटेशन => presentation
+ईमेल => email
+कॉल => call
+
+# ---------------------------------------------------------------------------
+# Tech / devices
+# ---------------------------------------------------------------------------
+वीडियो => video
+वीडियोज => videos
+फोन => phone
+फ़ोन => phone
+मोबाइल => mobile
+लैपटॉप => laptop
+कंप्यूटर => computer
+इंटरनेट => internet
+ऑनलाइन => online
+ऑफलाइन => offline
+डाउनलोड => download
+अपलोड => upload
+ऐप => app
+एप => app
+सॉफ्टवेयर => software
+डेटा => data
+डाटा => data
+पासवर्ड => password
+स्क्रीन => screen
+कैमरा => camera
+चार्जर => charger
+
+# ---------------------------------------------------------------------------
+# Social platforms and creator vocabulary — brands must never be phoneticised
+# ---------------------------------------------------------------------------
+यूट्यूब => YouTube
+यूट्यूबर => YouTuber
+इंस्टाग्राम => Instagram
+इंस्टा => Insta
+व्हाट्सएप => WhatsApp
+वॉट्सऐप => WhatsApp
+फेसबुक => Facebook
+ट्विटर => Twitter
+गूगल => Google
+चैनल => channel
+सब्सक्राइब => subscribe
+सब्सक्राइबर => subscriber
+लाइक => like
+कमेंट => comment
+शेयर => share
+फॉलो => follow
+फॉलोअर्स => followers
+रील => reel
+रील्स => reels
+पोस्ट => post
+स्टोरी => story
+कंटेंट => content
+व्लॉग => vlog
+लाइव => live
+ट्रेंडिंग => trending
+वायरल => viral
+
+# ---------------------------------------------------------------------------
+# Common connectives written in Devanagari
+# ---------------------------------------------------------------------------
+बट => but
+सो => so
+एंड => and
+ओके => okay
+एक्चुअली => actually
+बेसिकली => basically
+रियली => really
+सिंपल => simple
+ईज़ी => easy
+हार्ड => hard
+बेस्ट => best
+न्यू => new
+फ्री => free
+फुल => full
+
+# ---------------------------------------------------------------------------
+# Time / money / units
+# ---------------------------------------------------------------------------
+मिनट => minute
+मिनट्स => minutes
+सेकंड => second
+आवर => hour
+वीक => week
+मंथ => month
+ईयर => year
+टाइम => time
+डेट => date
+रुपीज => rupees
+डॉलर => dollar
+परसेंट => percent
+
+# ---------------------------------------------------------------------------
+# PROTECTED Latin phrases
+# Already-Latin tokens pass through the local engine untouched, but a model
+# backend (Sarvam / custom HTTP) could still "helpfully" rewrite them. These
+# entries lock them.
+# ---------------------------------------------------------------------------
+cheat day
+cheat days
+cheat meal
+diet
+workout
+work out
+gym
+protein
+calories
+weight loss
+meeting
+important
+project
+office
+business
+company
+client
+team
+market
+product
+service
+start
+startup
+update
+deadline
+presentation
+email
+video
+phone
+mobile
+laptop
+computer
+internet
+online
+app
+software
+data
+password
+YouTube
+YouTuber
+Instagram
+Insta
+WhatsApp
+Facebook
+Twitter
+Google
+channel
+subscribe
+subscriber
+like
+comment
+share
+follow
+followers
+reel
+reels
+post
+story
+content
+vlog
+live
+trending
+viral

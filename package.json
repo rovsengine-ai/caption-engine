@@ -1,0 +1,38 @@
+{
+  "name": "caption-engine",
+  "version": "0.1.0",
+  "description": "Word-timed captions, Auto Trim and clip finding for Indic + Hinglish video. Vendor-neutral core.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "test:render": "npm run build && node --test \"dist/test/render-integration.test.js\"",
+    "cli": "node dist/src/cli.js",
+    "doctor": "npm run build && node dist/src/cli.js doctor",
+    "demo": "npm run build && node dist/demo/pipeline.js",
+    "visual": "npm run build && node dist/demo/visual-check.js",
+    "fonts:install": "node scripts/install-fonts.mjs",
+    "shaping:probe": "python3 tools/shaping_probe.py",
+    "test:raster": "npm run build && node --test \"dist/test/rasteriser.test.js\"",
+    "test:pipeline": "npm run build && node --test \"dist/test/pipeline.test.js\"",
+    "evaluate": "npm run build && node dist/tools/evaluate.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/opentype.js": "^1.3.10",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "harfbuzzjs": "^1.5.0",
+    "opentype.js": "^2.0.0"
+  },
+  "bin": {
+    "caption-engine": "dist/src/cli.js"
+  }
+}
