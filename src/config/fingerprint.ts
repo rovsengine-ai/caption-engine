@@ -156,12 +156,22 @@ export function cutsConfigHash(o: {
   keepFillers?: boolean;
   language?: string;
   lowConfidenceThreshold?: number;
+  /** Whether waveform evidence was measured. Changes which cuts are proposed. */
+  audioAnalysis?: boolean;
+  /** Pass 2 propose-cut vs review-required threshold. */
+  fillerConfidence?: number | null;
 }): string {
   return configHash({
     trimSilence: o.trimSilence ?? null,
     keepFillers: o.keepFillers ?? false,
     language: o.language ?? null,
     lowConfidenceThreshold: o.lowConfidenceThreshold ?? null,
+    // A cut list produced with measured audio is not interchangeable with one
+    // produced from ASR gaps alone: same input, same flags otherwise, different
+    // proposals. Reusing one for the other is exactly the stale-cache bug the
+    // fingerprint exists to prevent, so both settings belong in the key.
+    audioAnalysis: o.audioAnalysis ?? null,
+    fillerConfidence: o.fillerConfidence ?? null,
   });
 }
 

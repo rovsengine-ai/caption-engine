@@ -12,7 +12,9 @@ import { providerFromEnv, assertWordTimings, type AsrProvider } from '../asr/ind
 import {
   autoTrim, applyTrim, applyHandles, snapCutsToFrames, keepSegments,
   DEFAULT_TRIM_OPTIONS, DEFAULT_CUT_HANDLE_SEC,
+  analyseFillerCandidates, decideFillers, summariseVerdicts, formatEvidenceTable,
 } from '../autotrim/index.js';
+import { analyzeAudio, type AudioAnalysis } from '../media/audio-analysis.js';
 import { groupIntoCues } from '../captions/group.js';
 import { buildAss, buildSrt } from '../captions/ass.js';
 import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
@@ -574,14 +576,87 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       trimSilence: opts.trimSilence,
       keepFillers: opts.keepFillers,
       language: transcript.language,
+      // Part of the cache key: the same input trimmed with and without measured
+      // audio legitimately yields different cuts, so a --cuts-in written by one
+      // must not be silently reused by the other.
+      audioAnalysis: !opts.noAudioAnalysis,
+      fillerConfidence: opts.fillerConfidence ?? null,
     });
-    const trim = autoTrim(transcript, {
+
+    // Measured audio evidence. Local FFmpeg only — three extra passes over the
+    // audio, which is why --no-audio-analysis exists for long files.
+    let audio: AudioAnalysis | null = null;
+    if (!opts.noAudioAnalysis) {
+      log.info('measuring audio (silence, level, per-window energy)…');
+      audio = await analyzeAudio(inputPath, info.durationSec);
+      if (audio.available) {
+        log.info(
+          `noise floor ${audio.noiseDb} dB (from mean ${audio.volume.meanDb ?? '?'} dB), ` +
+          `${audio.silences.length} silence region(s)`,
+        );
+      } else {
+        log.warn(`audio analysis unavailable: ${audio.unavailableReason}`);
+        log.warn('falling back to ASR-gap evidence; ambiguous fillers will be offered for review');
+        audio = null;
+      }
+    } else {
+      log.info('--no-audio-analysis: using ASR gaps only (weaker evidence)');
+    }
+
+    const trimOptions = {
       ...DEFAULT_TRIM_OPTIONS,
       maxSilenceSec: opts.trimSilence,
       removeFillers: !opts.keepFillers,
       removeFalseStarts: !opts.keepFillers,
       minCutConfidence: opts.minCutConfidence ?? DEFAULT_TRIM_OPTIONS.minCutConfidence,
-    });
+      audio,
+      minFillerDurationSec: opts.minFillerDuration ?? DEFAULT_TRIM_OPTIONS.minFillerDurationSec,
+      maxFillerDurationSec: opts.maxFillerDuration ?? DEFAULT_TRIM_OPTIONS.maxFillerDurationSec,
+      fillerConfidence: opts.fillerConfidence ?? DEFAULT_TRIM_OPTIONS.fillerConfidence,
+    };
+
+    // Evidence-only mode: print Pass 1 and stop. Nothing is cut, nothing is
+    // rendered, so this is always safe to run on a file you care about.
+    if (opts.analyzeFillerCandidates) {
+      const evidence = analyseFillerCandidates(transcript, audio, {
+        minFillerDurationSec: trimOptions.minFillerDurationSec,
+        maxFillerDurationSec: trimOptions.maxFillerDurationSec,
+      });
+      const verdicts = decideFillers(evidence, {
+        minFillerDurationSec: trimOptions.minFillerDurationSec,
+        maxFillerDurationSec: trimOptions.maxFillerDurationSec,
+        pauseWindowSec: trimOptions.ambiguousPauseWindowSec,
+        lowConfidence: trimOptions.lowConfidenceThreshold,
+        minAutoCutConfidence: trimOptions.fillerConfidence,
+      });
+      const s = summariseVerdicts(verdicts);
+      log.step('Filler candidates (Pass 1 evidence)');
+      console.log(formatEvidenceTable(evidence));
+      log.step('Verdicts (Pass 2)');
+      for (const v of verdicts) {
+        console.log(
+          `  [${v.decision.padEnd(15)}] ${String(v.evidence.originalToken).padEnd(14)} ` +
+          `conf ${v.confidence.toFixed(2)}  ${v.reason}`,
+        );
+      }
+      log.info(
+        `${s.total} candidate(s): ${s.proposeCut} propose-cut, ` +
+        `${s.reviewRequired} review-required, ${s.keep} keep`,
+      );
+      if (!audio) log.warn('measured without audio evidence — verdicts are weaker than they could be');
+      return {
+        input: inputPath, outputs: {}, workDir,
+        tooling: { ffmpeg: FFMPEG, ffprobe: FFPROBE, rasteriser: usedRasteriser },
+        transcript: {
+          words: transcript.words.length,
+          language: transcript.language,
+          provider: transcript.provider,
+          durationSec: transcript.duration,
+        },
+      };
+    }
+
+    const trim = autoTrim(transcript, trimOptions);
     if (opts.minCutConfidence) {
       log.info(`--min-cut-confidence ${opts.minCutConfidence}: lower-confidence proposals suppressed`);
     }

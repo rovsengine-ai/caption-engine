@@ -22,6 +22,16 @@ export interface CliOptions {
   romanFallback: 'error' | 'native' | 'http';
   /** Suppress Auto Trim proposals below this confidence, 0..1. */
   minCutConfidence?: number;
+  /** Print the Pass 1 filler evidence table and stop before rendering. */
+  analyzeFillerCandidates: boolean;
+  /** Skip the FFmpeg audio-measurement pass. Faster; weaker evidence. */
+  noAudioAnalysis: boolean;
+  /** Below this, a token is too brief to judge as a held hesitation. */
+  minFillerDuration?: number;
+  /** Above this, a token is a word spoken slowly, not a hesitation. */
+  maxFillerDuration?: number;
+  /** Pass 2 verdicts below this become review-required instead of propose-cut. */
+  fillerConfidence?: number;
   /** Seconds of audio kept on each side of a speech cut. */
   cutHandles?: number;
   /** Seconds of fade at each cut join. 0 disables. */
@@ -139,6 +149,26 @@ AUTO TRIM
       --auto-trim           Remove silences, fillers and false starts
       --trim-silence <sec>  Gap length treated as silence        (default: 0.7)
       --keep-fillers        Trim silence only, leave filler words in
+      --analyze-filler-candidates
+                            Print the evidence behind every filler candidate —
+                            duration, ASR confidence, ASR gaps, MEASURED silence,
+                            elongation, repetition, position — then stop. Nothing
+                            is cut. Use this when a cut looks wrong: the table
+                            shows which signal was responsible.
+      --no-audio-analysis   Skip the FFmpeg measurement pass (3 extra passes over
+                            the audio; real time on a long file). Auto Trim falls
+                            back to ASR-gap arithmetic, which cannot tell silence
+                            from a word the recogniser failed on. Ambiguous
+                            fillers are then offered for review rather than cut.
+      --min-filler-duration <sec>
+                            Shorter than this is too brief to judge     (default: 0.06)
+      --max-filler-duration <sec>
+                            Longer than this is a word, not a hesitation (default: 2.0)
+      --filler-confidence <0..1>
+                            Below this a filler is marked review-required instead
+                            of proposed for cutting                     (default: 0.6)
+                            Review cuts appear in --cuts-out with "restored": true
+                            and are NOT applied. Set it to false to accept one.
       --min-cut-confidence <0..1>
                             Only propose cuts this confident              (default: 0)
                             Every cut carries a deterministic confidence: silence
@@ -289,6 +319,11 @@ export function parseArgs(argv: string[]): ParsedCommand {
     autoTrim: false,
     trimSilence: 0.7,
     keepFillers: false,
+    analyzeFillerCandidates: false,
+    // Measured audio is on whenever Auto Trim runs. It is the difference
+    // between "the ASR emitted no word here" and "the speaker was silent here",
+    // and every filler verdict is weaker without it.
+    noAudioAnalysis: false,
     clips: false,
     cropFocusX: 0.5,
     crf: 20,
@@ -359,6 +394,12 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--trim-silence': o.trimSilence = num(a, next, 0.05, 30); i++; break;
       case '--keep-fillers': o.keepFillers = true; break;
       case '--min-cut-confidence': o.minCutConfidence = num(a, next, 0, 1); i++; break;
+      case '--analyze-filler-candidates':
+      case '--analyse-filler-candidates': o.analyzeFillerCandidates = true; break;
+      case '--no-audio-analysis': o.noAudioAnalysis = true; break;
+      case '--min-filler-duration': o.minFillerDuration = num(a, next, 0, 5); i++; break;
+      case '--max-filler-duration': o.maxFillerDuration = num(a, next, 0.05, 30); i++; break;
+      case '--filler-confidence': o.fillerConfidence = num(a, next, 0, 1); i++; break;
       case '--cut-handles': o.cutHandles = num(a, next, 0, 1); i++; break;
       case '--cut-fade': o.cutFade = num(a, next, 0, 0.5); i++; break;
       case '--clips': o.clips = true; break;
