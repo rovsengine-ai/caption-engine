@@ -1,7 +1,12 @@
 import type { Cut, CutReason, Transcript, TrimResult, Word } from '../types.js';
 import { matchFiller, normaliseToken } from './fillers.js';
+import type { AudioAnalysis } from '../media/audio-analysis.js';
+import { analyseFillerCandidates } from './analysis.js';
+import { decideFillers, type FillerVerdict } from './decide.js';
 
 export * from './fillers.js';
+export * from './analysis.js';
+export * from './decide.js';
 
 export interface TrimOptions {
   /** Gaps longer than this (seconds) are cut. 0.6-0.9 feels natural; below 0.4 sounds clipped. */
@@ -33,6 +38,25 @@ export interface TrimOptions {
    * engine did propose.
    */
   minCutConfidence: number;
+
+  // ---- Two-pass filler analysis -------------------------------------------
+
+  /**
+   * Route fillers through analyse → decide instead of the lexicon-only path.
+   *
+   * Default true. The old path is retained (and still tested) because it is the
+   * only thing that works when there is no audio to measure and no evidence to
+   * weigh — a transcript-only run via `--transcript-in`, for instance.
+   */
+  twoPassFillers: boolean;
+  /** Measured audio evidence. Null disables every waveform-derived signal. */
+  audio: AudioAnalysis | null;
+  /** Below this, a token is too brief to judge on timing. */
+  minFillerDurationSec: number;
+  /** Above this, a token is a word being spoken slowly, not a hesitation. */
+  maxFillerDurationSec: number;
+  /** Pass 2 verdicts below this are downgraded from propose-cut to review. */
+  fillerConfidence: number;
 }
 
 /**
@@ -58,6 +82,12 @@ export const DEFAULT_TRIM_OPTIONS: TrimOptions = {
   // Propose everything by default. The review step is the safety net, and
   // hiding a proposal is worse than showing one the user rejects in a click.
   minCutConfidence: 0,
+
+  twoPassFillers: true,
+  audio: null,
+  minFillerDurationSec: 0.06,
+  maxFillerDurationSec: 2.0,
+  fillerConfidence: 0.6,
 };
 
 /**
@@ -88,6 +118,31 @@ function mkCut(a: {
     sourceWords: a.sourceWords,
     confidence: clamp01(a.confidence),
     restored: false,
+  };
+}
+
+/** Flatten a Pass 2 verdict into the serialisable evidence block on a Cut. */
+function evidenceRecord(v: FillerVerdict): NonNullable<Cut['evidence']> {
+  const e = v.evidence;
+  return {
+    originalToken: e.originalToken,
+    normalizedToken: e.normalizedToken,
+    language: e.language,
+    script: e.script,
+    durationSec: e.durationSec,
+    asrConfidence: e.asrConfidence,
+    gapBeforeSec: e.gapBeforeSec,
+    gapAfterSec: e.gapAfterSec,
+    measuredQuietBeforeSec: e.measuredQuietBeforeSec,
+    measuredQuietAfterSec: e.measuredQuietAfterSec,
+    energyDb: e.energyDb,
+    voicedRatio: e.voicedRatio,
+    audioAvailable: e.audioAvailable,
+    isElongated: e.isElongated,
+    isStretched: e.isStretched,
+    repetitionRun: e.repetitionRun,
+    signals: v.signals.map((s) => ({ name: s.name, weight: s.weight, detail: s.detail })),
+    ...(v.blockedBy ? { blockedBy: v.blockedBy } : {}),
   };
 }
 
@@ -161,7 +216,47 @@ export function autoTrim(
   }
 
   // ---- 2. Filler words -------------------------------------------------------
-  if (opts.removeFillers) {
+  // Two-pass: gather evidence (analysis.ts), then weigh it (decide.ts).
+  // A `review-required` verdict becomes a cut with restored:true — visible in
+  // --cuts-out and the review list, but not applied. See Cut.decision.
+  if (opts.removeFillers && opts.twoPassFillers) {
+    const evidence = analyseFillerCandidates(transcript, opts.audio, {
+      minFillerDurationSec: opts.minFillerDurationSec,
+      maxFillerDurationSec: opts.maxFillerDurationSec,
+    });
+    const verdicts = decideFillers(evidence, {
+      minFillerDurationSec: opts.minFillerDurationSec,
+      maxFillerDurationSec: opts.maxFillerDurationSec,
+      pauseWindowSec: opts.ambiguousPauseWindowSec,
+      lowConfidence: opts.lowConfidenceThreshold,
+      minAutoCutConfidence: opts.fillerConfidence,
+    });
+
+    for (const v of verdicts) {
+      if (v.decision === 'keep') continue;
+      const w = words[v.evidence.index]!;
+      cuts.push({
+        ...mkCut({
+          id: nextId('filler'),
+          start: w.start,
+          end: w.end,
+          reason: 'filler',
+          label: v.decision === 'review-required'
+            ? `review: "${w.text}" — ${v.reason}`
+            : `filler: "${w.text}"`,
+          wordIndices: [v.evidence.index],
+          sourceWords: [w.text],
+          confidence: v.confidence,
+        }),
+        restored: v.decision === 'review-required',
+        decision: v.decision,
+        decisionReason: v.reason,
+        evidence: evidenceRecord(v),
+      });
+    }
+  }
+
+  if (opts.removeFillers && !opts.twoPassFillers) {
     for (let k = 0; k < spoken.length; k++) {
       const { w, i } = spoken[k]!;
       const lang = w.language ?? transcript.language;
@@ -252,7 +347,12 @@ export function autoTrim(
     ? cuts.filter((c) => c.confidence >= opts.minCutConfidence)
     : cuts;
   const merged = mergeOverlapping(filtered);
-  const removed = merged.reduce((n, c) => n + (c.end - c.start), 0);
+  // Only cuts that will actually be applied count towards the saving. Before
+  // the three-way verdict every cut here was active, so the filter was a no-op
+  // and its absence went unnoticed; `review-required` cuts made it load-bearing.
+  const removed = merged
+    .filter((c) => !c.restored)
+    .reduce((n, c) => n + (c.end - c.start), 0);
 
   return {
     cuts: merged,
@@ -422,7 +522,12 @@ function mergeOverlapping(cuts: Cut[]): Cut[] {
   for (let k = 1; k < cuts.length; k++) {
     const cur = cuts[k]!;
     const last = out[out.length - 1]!;
-    if (cur.start <= last.end) {
+    // Never merge across the applied/not-applied boundary. A `review-required`
+    // cut carries restored:true; absorbing it into an overlapping active cut
+    // would apply it without anyone deciding to, which is precisely the failure
+    // the three-way verdict exists to prevent. The reverse is just as bad: an
+    // active cut swallowed by a restored one silently stops being applied.
+    if (cur.start <= last.end && cur.restored === last.restored) {
       last.end = Math.max(last.end, cur.end);
       // Union by index, then re-derive the word list from the index order so
       // sourceWords stays in transcript order rather than merge order.

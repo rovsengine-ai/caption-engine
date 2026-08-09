@@ -117,6 +117,47 @@ export interface Cut {
   confidence: number;
   /** User can restore any cut. Restored cuts are skipped at render time. */
   restored: boolean;
+
+  // ---- Two-pass Auto Trim. Optional: cut files written before this existed
+  // ---- still load, and detectors that do not run the two passes omit them.
+
+  /**
+   * The Pass 2 verdict.
+   *
+   * `review-required` cuts are emitted with `restored: true`, so they appear in
+   * the review list and in --cuts-out but are NOT applied. That is the whole
+   * point of the three-way verdict: the engine can say "I am not sure" without
+   * either silently deleting the word or silently hiding the proposal. Flip
+   * `restored` to false to accept one.
+   */
+  decision?: 'keep' | 'propose-cut' | 'review-required';
+  /** Why, in one sentence a reviewer can act on. */
+  decisionReason?: string;
+  /**
+   * The independent signals that supported this cut, with their weights.
+   * Present so a wrong cut can be traced to the signal that lied, rather than
+   * to an opaque score.
+   */
+  evidence?: {
+    originalToken?: string;
+    normalizedToken?: string;
+    language?: string;
+    script?: string;
+    durationSec?: number;
+    asrConfidence?: number;
+    gapBeforeSec?: number;
+    gapAfterSec?: number;
+    measuredQuietBeforeSec?: number;
+    measuredQuietAfterSec?: number;
+    energyDb?: number;
+    voicedRatio?: number;
+    audioAvailable?: boolean;
+    isElongated?: boolean;
+    isStretched?: boolean;
+    repetitionRun?: number;
+    signals?: Array<{ name: string; weight: number; detail: string }>;
+    blockedBy?: string;
+  };
 }
 
 export interface TrimResult {

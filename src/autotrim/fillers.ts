@@ -47,20 +47,49 @@ export interface FillerLexicon {
   always: string[];
   /** Real words that are ALSO used as fillers. Require extra evidence to cut. */
   ambiguous: string[];
+  /**
+   * Structurally required words that must NEVER be removed automatically,
+   * whatever the evidence says.
+   *
+   * `ambiguous` says "needs corroboration"; `never` says "not negotiable".
+   * The distinction exists because corroboration can be manufactured by
+   * accident: an English article "a" before a dramatic pause has a long gap
+   * after it, low ASR confidence (it is 40 ms of schwa), and short duration —
+   * three signals agreeing on a cut that destroys the sentence.
+   *
+   * Entries here are still reported as candidates and can still be cut by an
+   * explicit human decision in the review file. Only the automatic path is
+   * closed.
+   */
+  never?: string[];
 }
 
 const EN: FillerLexicon = {
   always: ['um', 'umm', 'uh', 'uhh', 'er', 'erm', 'ah', 'ahh', 'hmm', 'mmm', 'uhm'],
   ambiguous: ['like', 'so', 'basically', 'actually', 'literally', 'right', 'okay', 'you know', 'i mean'],
+  // "a" is the case this tier was built for. It is one phoneme, frequently
+  // low-confidence, and routinely precedes a pause ("that was a... disaster").
+  // Removing it turns "a meeting" into "meeting" in every caption on screen.
+  never: [
+    'a', 'an', 'the', 'i', 'is', 'am', 'are', 'was', 'be', 'to', 'of',
+    'in', 'it', 'on', 'at', 'we', 'he', 'my', 'no', 'not', 'and', 'or',
+  ],
 };
 
 const HI: FillerLexicon = {
   always: ['हम्म', 'अं', 'उम', 'एर'],
   ambiguous: [
-    'हूँ', 'हूं', // "am" — मैं ठीक हूँ. A core verb form, never cut without a pause.
     'अ', // bare vowel letter; ASR emits it for hesitation but it can be a fragment
     'आ', // "come" (imperative), also a hesitation drawl
     'मतलब', 'यानी', 'वो', 'तो', 'बस', 'अच्छा', 'ठीक है', 'क्या बोलते हैं',
+  ],
+  // Copulas, postpositions and negation. Removing any of these does not
+  // shorten a sentence, it breaks it. हूँ was previously only `ambiguous`,
+  // which meant a pause on either side was enough to delete "am".
+  never: [
+    'हूँ', 'हूं', 'है', 'हैं', 'था', 'थी', 'थे', 'हो',
+    'में', 'को', 'का', 'की', 'के', 'से', 'पर',
+    'और', 'नहीं', 'ना', 'मैं', 'ये', 'यह',
   ],
 };
 
@@ -72,6 +101,11 @@ const HI_ROMAN: FillerLexicon = {
     'arre', // interjection, but carries emphasis
     'aa', // "come", and the romanisation of आ
     'matlab', 'yaani', 'yaar', 'toh', 'bas', 'accha', 'theek hai', 'kya bolte hain', 'woh',
+  ],
+  never: [
+    'hai', 'hain', 'hoon', 'hun', 'hu', 'tha', 'thi', 'the', 'ho',
+    'mein', 'ko', 'ka', 'ki', 'ke', 'se', 'par',
+    'aur', 'nahi', 'nahin', 'na', 'main', 'ye', 'yeh',
   ],
 };
 
@@ -86,6 +120,7 @@ const TE: FillerLexicon = {
 const TE_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
   ambiguous: ['aa', 'ante', 'antey', 'entante', 'adi', 'kada', 'mari', 'sare'],
+  never: ['nenu', 'meeru', 'undi', 'ledu', 'kaadu', 'ki', 'lo', 'tho', 'na'],
 };
 
 const KN: FillerLexicon = {
@@ -99,6 +134,7 @@ const KN: FillerLexicon = {
 const KN_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
   ambiguous: ['aa', 'andre', 'adu', 'alva', 'sari', 'matte'],
+  never: ['naanu', 'neevu', 'ide', 'illa', 'alla', 'ge', 'alli', 'inda', 'na'],
 };
 
 const TA: FillerLexicon = {
@@ -112,6 +148,7 @@ const TA: FillerLexicon = {
 const TA_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
   ambiguous: ['aa', 'appuram', 'adhu', 'illa', 'sari', 'ennanna', 'appadi'],
+  never: ['naan', 'neenga', 'irukku', 'illai', 'ku', 'la', 'oda', 'na'],
 };
 
 const ML: FillerLexicon = {
@@ -177,6 +214,7 @@ const MR: FillerLexicon = {
 const MR_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
   ambiguous: ['aa', 'mhanje', 'tar', 'bara', 'asa', 'kay'],
+  never: ['mi', 'tu', 'aahe', 'nahi', 'la', 'cha', 'chi', 'che', 'ani', 'na'],
 };
 
 /**
@@ -214,12 +252,38 @@ export interface FillerMatch {
   isFiller: boolean;
   /** Ambiguous fillers need corroborating evidence before we cut them. */
   ambiguous: boolean;
+  /**
+   * The token is in the `never` tier. Always accompanied by `isFiller: false`,
+   * so every existing caller is protected without changing its logic.
+   */
+  protectedWord?: boolean;
+}
+
+/**
+ * Is this token in the `never` tier for this language?
+ *
+ * Checked independently of `matchFiller` by the two-pass analyser, which still
+ * wants to *report* protected tokens as candidates so a human reviewer can see
+ * them — it just refuses to cut them automatically.
+ */
+export function matchNeverCut(token: string, language = 'en'): boolean {
+  const base = (language.split('-')[0] ?? 'en').toLowerCase();
+  const sets = LEXICONS[base] ?? [EN];
+  const t = normaliseToken(token);
+  if (!t) return false;
+  return sets.some((set) => set.never?.includes(t) ?? false);
 }
 
 /**
  * Is this token a filler in the given language context?
  * Falls back to English-only when the language is unknown — deliberately
  * conservative, since over-cutting is far worse than under-cutting.
+ *
+ * The `never` tier is checked FIRST and short-circuits to "not a filler". That
+ * ordering is the whole point: a word can appear in both `never` and, via a
+ * romanisation collision, some other language's `ambiguous` list. Protection
+ * has to win, and it has to win here rather than at every call site, so that
+ * callers written before this tier existed inherit the guard for free.
  */
 export function matchFiller(token: string, language = 'en'): FillerMatch {
   const base = (language.split('-')[0] ?? 'en').toLowerCase();
@@ -227,6 +291,9 @@ export function matchFiller(token: string, language = 'en'): FillerMatch {
   const t = normaliseToken(token);
   if (!t) return { isFiller: false, ambiguous: false };
 
+  if (sets.some((set) => set.never?.includes(t) ?? false)) {
+    return { isFiller: false, ambiguous: false, protectedWord: true };
+  }
   for (const set of sets) {
     if (set.always.includes(t)) return { isFiller: true, ambiguous: false };
   }
