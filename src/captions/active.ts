@@ -1,4 +1,5 @@
 import type { CaptionCue, CaptionStyle } from '../types.js';
+import type { ToneStyle } from './tone-style.js';
 
 /** One exact active-word window, derived only from ASR word timestamps. */
 export interface ActiveWordWindow {
@@ -36,20 +37,60 @@ export interface FinalWordStyle {
   scale: number;
 }
 
-/** Resolve tone/base styling and active emphasis into one renderable style. */
+/**
+ * Resolve base style, tone style and active-word emphasis into one renderable
+ * style.
+ *
+ * ORDER, and why it is this way:
+ *
+ *   base caption style  →  tone style  →  active-word state
+ *
+ * Tone describes how a word was SPOKEN and is fixed for the whole time that
+ * word is on screen. Active-word state describes WHEN it is being spoken and
+ * changes frame to frame. The transient signal must therefore win: if a tone
+ * had the final say, the highlight would be invisible on exactly the loud words
+ * a viewer is most likely to be looking at.
+ *
+ * Tone contributes nothing unless a theme actually supplies a value, so with no
+ * tone (the default) this reduces to precisely the previous behaviour.
+ */
 export function resolveWordStyle(
   style: CaptionStyle,
   active: boolean,
-  opts: { activeScale?: number; activeBold?: boolean } = {},
+  opts: {
+    activeScale?: number;
+    activeBold?: boolean;
+    /** Partial style from the caption theme for this word's classified tone. */
+    tone?: ToneStyle;
+  } = {},
 ): FinalWordStyle {
-  // Historical SVG output is bold. An explicit --active-bold changes only the
-  // optional mode: resting words become regular and the active word uses the
-  // real bold face, so the flag has a visible, useful effect.
   const activeBold = opts.activeBold ?? false;
+  const tone = opts.tone ?? {};
+
+  // Default (no --active-bold): every word uses the bold face, which is the
+  // historical SVG output and what short-form captions want.
+  //
+  // With --active-bold the flag earns its name: resting words drop to the
+  // regular face so that the active word's real bold face is a visible
+  // contrast. Previously this read `active ? (activeBold || true) : ...`, where
+  // `activeBold || true` is unconditionally true — so the active word was
+  // always bold and the flag only ever changed resting words. Weight now
+  // genuinely tracks the flag on both sides.
+  const baseBold = activeBold ? active : true;
+  const bold = tone.bold ?? baseBold;
+
+  // Tone scale and active scale MULTIPLY. Layout reserves the widest state a
+  // word can reach (see reservedWidth in svg.ts), so both must be visible to
+  // the measurement pass or a scaled word would overflow the space kept for it.
+  const activeScale = active ? (opts.activeScale ?? 1) : 1;
+  const scale = (tone.scale ?? 1) * activeScale;
+
   return {
-    fontFamily: style.fontFamily,
-    bold: active ? (activeBold || true) : !activeBold,
-    color: active ? style.activeColor : style.primaryColor,
-    scale: active ? (opts.activeScale ?? 1) : 1,
+    fontFamily: tone.fontFamily ?? style.fontFamily,
+    bold: active ? (activeBold ? true : bold) : bold,
+    // The active colour is the whole point of the highlight; a tone colour must
+    // not override it, or the word being spoken would blend into its neighbours.
+    color: active ? style.activeColor : tone.color ?? style.primaryColor,
+    scale,
   };
 }

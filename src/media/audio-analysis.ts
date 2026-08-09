@@ -51,7 +51,11 @@
  * See docs/THIRD-PARTY-NOTICES.md. The energy/voicing index below is our own.
  */
 
-import { FFMPEG, run } from './ffmpeg.js';
+import { FFMPEG, run, runBinary } from './ffmpeg.js';
+import {
+  trackPitch, pcm16ToFloat, medianF0, pitchSpreadSemitones, semitones,
+  DEFAULT_PITCH_OPTIONS, type PitchFrame,
+} from './pitch.js';
 
 /** A silence region measured from the waveform. `end === null` means run-to-EOF. */
 export interface SilenceRange {
@@ -79,6 +83,13 @@ export interface AudioAnalysisSnapshot {
   windowSec: number;
   duration: number;
   unavailableReason?: string;
+  /**
+   * Local F0 track, when pitch analysis ran. OPTIONAL on purpose: snapshots
+   * written before pitch existed still load, and Auto Trim never needed it.
+   */
+  pitch?: PitchFrame[];
+  /** Hop between pitch frames, seconds. Needed to map a frame back to a span. */
+  pitchHopSec?: number;
 }
 
 export interface AudioAnalysisOptions {
@@ -227,6 +238,10 @@ export class AudioAnalysis {
   /** Set when measurement was skipped or failed; consumers must degrade, not guess. */
   readonly unavailableReason?: string;
 
+  /** Local F0 track. Empty when pitch analysis was not run or found nothing. */
+  readonly pitch: PitchFrame[];
+  readonly pitchHopSec: number;
+
   private readonly windows: EnergyWindow[];
   private readonly duration: number;
 
@@ -238,6 +253,8 @@ export class AudioAnalysis {
     windowSec: number;
     duration: number;
     unavailableReason?: string;
+    pitch?: PitchFrame[];
+    pitchHopSec?: number;
   }) {
     this.silences = a.silences;
     this.volume = a.volume;
@@ -246,6 +263,57 @@ export class AudioAnalysis {
     this.windowSec = a.windowSec;
     this.duration = a.duration;
     this.unavailableReason = a.unavailableReason;
+    this.pitch = a.pitch ?? [];
+    this.pitchHopSec = a.pitchHopSec ?? DEFAULT_PITCH_OPTIONS.hopSec;
+  }
+
+  /** True when a local F0 track is present. */
+  get hasPitch(): boolean {
+    return this.pitch.length > 0;
+  }
+
+  /** Pitch frames overlapping [start, end). */
+  private pitchIn(start: number, end: number): PitchFrame[] {
+    return this.pitch.filter((f) => f.t + this.pitchHopSec > start && f.t < end);
+  }
+
+  /**
+   * Median F0 across [start, end), in Hz. null when nothing voiced was found.
+   *
+   * Median, not mean: a single octave error would drag a mean noticeably, and
+   * unvoiced consonants inside a word are common enough that outliers are the
+   * normal case rather than the exception.
+   */
+  f0Hz(start: number, end: number): number | null {
+    return medianF0(this.pitchIn(start, end));
+  }
+
+  /** Interquartile F0 spread across [start, end), in semitones. */
+  pitchSpread(start: number, end: number): number {
+    return pitchSpreadSemitones(this.pitchIn(start, end));
+  }
+
+  /**
+   * How far this span's pitch sits from the speaker's own baseline, in
+   * semitones. Positive means higher than usual.
+   *
+   * Relative to the clip, because absolute Hz says more about who is speaking
+   * than about how they are speaking: 180 Hz is a raised voice for one speaker
+   * and a relaxed one for another.
+   */
+  pitchRelative(start: number, end: number): number {
+    const here = this.f0Hz(start, end);
+    const base = this.baselineF0();
+    if (here === null || base === null) return 0;
+    return semitones(base, here);
+  }
+
+  private baselineCache: number | null | undefined;
+
+  /** Median F0 across the whole clip — the speaker's own reference point. */
+  baselineF0(): number | null {
+    if (this.baselineCache === undefined) this.baselineCache = medianF0(this.pitch);
+    return this.baselineCache;
   }
 
   /** True when nothing was measured — callers must not treat absence as silence. */
@@ -263,6 +331,9 @@ export class AudioAnalysis {
       windowSec: this.windowSec,
       duration: this.duration,
       unavailableReason: this.unavailableReason,
+      ...(this.pitch.length > 0
+        ? { pitch: this.pitch, pitchHopSec: this.pitchHopSec }
+        : {}),
     };
   }
 
@@ -457,17 +528,61 @@ export async function measureEnergy(
 }
 
 /**
- * Full local audio analysis: level, adaptive threshold, silence, energy.
+ * Decode the audio to raw 16 kHz mono PCM and estimate F0 locally.
  *
- * Three FFmpeg passes. On a 60-minute file that is real wall-clock time, which
- * is why the caller can switch it off. It never throws: a failure downgrades to
- * an unavailable analysis carrying the reason, because losing measured evidence
- * should weaken Auto Trim's confidence, not abort the user's render.
+ * FFmpeg is used purely as a decoder here — `-f s16le` to stdout, no filters
+ * beyond resampling and downmixing. The pitch estimation itself is our own
+ * TypeScript (src/media/pitch.ts): nothing is uploaded, no service is contacted,
+ * and the result is reproducible on any machine with the same file.
+ *
+ * Returns an empty array rather than throwing. Pitch is an enhancement to the
+ * prosody signal; failing to measure it must weaken the classifier's confidence,
+ * not abort a render.
+ */
+export async function measurePitch(
+  input: string,
+  timeoutMs: number,
+  options: { hopSec?: number; windowSec?: number } = {},
+): Promise<{ frames: PitchFrame[]; hopSec: number; truncated: boolean }> {
+  const rate = DEFAULT_PITCH_OPTIONS.sampleRate;
+  const hopSec = options.hopSec ?? DEFAULT_PITCH_OPTIONS.hopSec;
+  const res = await runBinary(
+    FFMPEG,
+    [
+      '-hide_banner', '-nostdin', '-i', input, '-map', '0:a:0',
+      '-ac', '1', '-ar', String(rate),
+      '-f', 's16le', '-acodec', 'pcm_s16le', '-',
+    ],
+    { timeoutMs },
+  );
+  if (res.stdout.length < 2) return { frames: [], hopSec, truncated: res.truncated };
+
+  const samples = pcm16ToFloat(res.stdout);
+  const frames = trackPitch(samples, {
+    sampleRate: rate,
+    hopSec,
+    ...(options.windowSec !== undefined ? { windowSec: options.windowSec } : {}),
+  });
+  return { frames, hopSec, truncated: res.truncated };
+}
+
+/**
+ * Full local audio analysis: level, adaptive threshold, silence, energy, and
+ * optionally pitch.
+ *
+ * Three FFmpeg passes, plus a fourth when pitch is requested. On a 60-minute
+ * file that is real wall-clock time, which is why the caller can switch it off.
+ * It never throws: a failure downgrades to an unavailable analysis carrying the
+ * reason, because losing measured evidence should weaken Auto Trim's
+ * confidence, not abort the user's render.
+ *
+ * `pitch` defaults to FALSE so that every existing caller — Auto Trim, the
+ * filler analyser — performs exactly the same work it did before.
  */
 export async function analyzeAudio(
   input: string,
   durationSec: number,
-  options: Partial<AudioAnalysisOptions> = {},
+  options: Partial<AudioAnalysisOptions> & { pitch?: boolean } = {},
 ): Promise<AudioAnalysis> {
   const opts = { ...DEFAULT_AUDIO_ANALYSIS_OPTIONS, ...options };
   try {
@@ -480,10 +595,26 @@ export async function analyzeAudio(
     if (windows.length === 0) {
       return unavailableAudioAnalysis('FFmpeg returned no RMS windows (no audio stream?)');
     }
+
+    let pitch: PitchFrame[] = [];
+    let pitchHopSec = DEFAULT_PITCH_OPTIONS.hopSec;
+    if (options.pitch) {
+      // Isolated: a pitch failure must not cost the caller the three
+      // measurements that already succeeded.
+      try {
+        const p = await measurePitch(input, opts.timeoutMs);
+        pitch = p.frames;
+        pitchHopSec = p.hopSec;
+      } catch {
+        pitch = [];
+      }
+    }
+
     return new AudioAnalysis({
       silences, volume, noiseDb, windows,
       windowSec: opts.windowSec,
       duration: durationSec,
+      pitch, pitchHopSec,
     });
   } catch (err) {
     return unavailableAudioAnalysis(

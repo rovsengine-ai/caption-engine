@@ -2,6 +2,7 @@ import type { CaptionCue, CaptionStyle, Word } from '../types.js';
 import { shapeText, shapedToSvgRuns, type ShapedText } from '../text/shaper.js';
 import { primaryScript, isRtlScript } from '../text/script.js';
 import { activeWordWindows, resolveWordStyle } from './active.js';
+import type { ToneStyle } from './tone-style.js';
 
 /**
  * Caption rendering as SVG, using pre-shaped vector outlines.
@@ -32,6 +33,14 @@ export interface SvgRenderOptions {
   maxLines?: number;
   /** Emit a transparent background (for overlay) or opaque (for previews). */
   background?: string;
+  /**
+   * Per-word tone styles, keyed by index within the cue.
+   *
+   * Absent (the default) means no prosody styling ran and every word resolves
+   * exactly as it did before tone existed — that is what keeps the no-flag
+   * render byte-identical.
+   */
+  toneStyles?: ReadonlyMap<number, ToneStyle>;
 }
 
 interface LaidOutWord {
@@ -101,13 +110,22 @@ export async function layoutCue(
   for (let i = 0; i < cue.words.length; i++) {
     const w = cue.words[i]!;
     const text = style.uppercase ? w.text.toUpperCase() : w.text;
-    const resting = resolveWordStyle(style, false, opts);
-    const active = resolveWordStyle(style, true, opts);
+    // The word's tone is fixed for the whole cue, so it participates in BOTH
+    // measurements. Reserving only the untoned width would let a toned word
+    // overflow the space kept for it and shove the line sideways.
+    const tone = opts.toneStyles?.get(i);
+    const perWord = { ...opts, ...(tone ? { tone } : {}) };
+    const resting = resolveWordStyle(style, false, perWord);
+    const active = resolveWordStyle(style, true, perWord);
     const shaped = await shapeText(text, fontSize, {
       bold: resting.bold, fontFamily: resting.fontFamily,
     });
+    // Reserve the widest state this word can ever occupy. Layout is then
+    // identical for every frame of the cue, which is what stops the line from
+    // jumping as the highlight moves across it.
+    const restingWidth = shaped.width * resting.scale;
     const activeWidth = await measureForActive(text, fontSize, active);
-    const reservedWidth = Math.max(shaped.width, activeWidth);
+    const reservedWidth = Math.max(restingWidth, activeWidth);
     shapedWords.push({ word: w, index: i, shaped, x: 0, width: shaped.width, reservedWidth });
   }
 
@@ -190,11 +208,24 @@ export async function renderCueSvg(
   for (const line of lines) {
     for (const lw of line.words) {
       const isActive = lw.index === activeIdx;
-      const finalStyle = resolveWordStyle(style, isActive, { activeScale, activeBold: opts.activeBold });
+      const tone = opts.toneStyles?.get(lw.index);
+      const finalStyle = resolveWordStyle(style, isActive, {
+        activeScale, activeBold: opts.activeBold, ...(tone ? { tone } : {}),
+      });
       const text = style.uppercase ? lw.word.text.toUpperCase() : lw.word.text;
-      const shaped = finalStyle.bold === (!opts.activeBold)
-        ? lw.shaped
-        : await shapeText(text, style.fontSizePx, { bold: finalStyle.bold, fontFamily: finalStyle.fontFamily });
+      // `lw.shaped` was shaped in the RESTING state. Reuse it only when the
+      // final state matches; otherwise re-shape with the real face, because
+      // faking weight with a stroke thickens the outline as well as the glyph
+      // and looks wrong on Indic conjuncts in particular.
+      const resting = resolveWordStyle(style, false, {
+        activeScale, activeBold: opts.activeBold, ...(tone ? { tone } : {}),
+      });
+      const shaped =
+        finalStyle.bold === resting.bold && finalStyle.fontFamily === resting.fontFamily
+          ? lw.shaped
+          : await shapeText(text, style.fontSizePx, {
+              bold: finalStyle.bold, fontFamily: finalStyle.fontFamily,
+            });
       const runs = shapedToSvgRuns(shaped);
       if (runs.length === 0) continue;
       const colour = finalStyle.color;
@@ -203,7 +234,7 @@ export async function renderCueSvg(
       // centre so it grows in place rather than drifting right.
       const left = lw.x + (lw.reservedWidth - shaped.width) / 2;
       let wordTransform = `translate(${left.toFixed(2)},${line.y.toFixed(2)})`;
-      if (isActive && finalStyle.scale !== 1) {
+      if (finalStyle.scale !== 1) {
         const cx = shaped.width / 2;
         wordTransform =
           `translate(${(left + cx).toFixed(2)},${line.y.toFixed(2)}) ` +
@@ -322,15 +353,28 @@ async function measureForActive(
   return width.width * active.scale;
 }
 
+/**
+ * Tone styles for a whole transcript: cue index → word index → style.
+ *
+ * Two levels because `toneStyles` on a render call is per-cue (word indices are
+ * cue-local), while the caller holds one map for the entire video.
+ */
+export type ToneStylesByCue = ReadonlyMap<number, ReadonlyMap<number, ToneStyle>>;
+
 /** Generate the SVG for one planned frame, on demand. */
 export async function renderPlannedFrame(
   cues: CaptionCue[],
   plan: CaptionFramePlan,
-  opts: SvgRenderOptions,
+  opts: SvgRenderOptions & { toneStylesByCue?: ToneStylesByCue },
 ): Promise<string> {
   const cue = cues.find((c) => c.index === plan.cueIndex);
   if (!cue) throw new Error(`No cue with index ${plan.cueIndex}`);
-  return renderCueSvg(cue, { ...opts, activeWordIndex: plan.activeWordIndex });
+  const forCue = opts.toneStylesByCue?.get(plan.cueIndex);
+  return renderCueSvg(cue, {
+    ...opts,
+    activeWordIndex: plan.activeWordIndex,
+    ...(forCue ? { toneStyles: forCue } : {}),
+  });
 }
 
 /**

@@ -68,6 +68,13 @@ export interface CliOptions {
   codeSwitching: boolean;
   /** Print the per-token original → final table. */
   showDiagnostics: boolean;
+  /**
+   * Analyse local audio prosody (loudness + F0 pitch) and style words by tone.
+   * OFF by default: with this absent the render is byte-identical to before.
+   */
+  prosody: boolean;
+  /** Override config/caption-theme.json. */
+  captionTheme?: string;
   /** Propose Auto Trim cuts and stop before rendering. */
   reviewCuts: boolean;
   transcriptOut?: string;
@@ -136,6 +143,10 @@ APPEARANCE
                                    in Devanagari; leans on the glossary.
                             sarvam model-based, needs SARVAM_API_KEY
                             http   your own endpoint via TRANSLITERATE_URL
+      --prosody             Measure local audio prosody (loudness + F0 pitch,
+                            all offline) and style each word by its tone.
+                            Off by default; without it output is unchanged.
+      --caption-theme <f>   Tone→style map. Default: config/caption-theme.json
       --hinglish-glossary <f>
                             Extra glossary merged over the built-in one. Maps
                             Devanagari-written English back to real spelling
@@ -346,6 +357,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
     // 'error' preserves the pre-existing strict behaviour: asking for Roman and
     // getting native back must be something you opted into.
     romanFallback: 'error',
+    prosody: false,
     allowStale: false,
     dryRun: false,
     verbose: false,
@@ -434,6 +446,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--protect-english': o.protectEnglish = true; break;
       case '--no-protect-english': o.protectEnglish = false; break;
       case '--diagnostics': o.showDiagnostics = true; break;
+      case '--prosody': o.prosody = true; break;
+      case '--caption-theme': o.captionTheme = needValue(a, next); i++; break;
       case '--code-switching': case '--code-switch': o.codeSwitching = true; break;
       case '--keyterms':
         o.keyterms = needValue(a, next).split(',').map((x) => x.trim()).filter(Boolean);

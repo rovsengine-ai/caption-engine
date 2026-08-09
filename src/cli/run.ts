@@ -15,6 +15,13 @@ import {
   analyseFillerCandidates, decideFillers, summariseVerdicts, formatEvidenceTable,
 } from '../autotrim/index.js';
 import { analyzeAudio, type AudioAnalysis } from '../media/audio-analysis.js';
+import { analyzeProsody, type ProsodyAnalysis } from '../media/prosody.js';
+import { loadProsodyCache, saveProsodyCache } from '../media/prosody-cache.js';
+import {
+  loadCaptionTheme, toneStyleFor, formatProsodyDiagnostics, NEUTRAL_THEME,
+  type ToneStyle, type ProsodyDiagnosticRow,
+} from '../captions/tone-style.js';
+import { resolveWordStyle } from '../captions/active.js';
 import { groupIntoCues } from '../captions/group.js';
 import { buildAss, buildSrt } from '../captions/ass.js';
 import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
@@ -880,6 +887,115 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   }
   log.info(`${cues.length} cues`);
 
+  // ---- Local audio prosody -------------------------------------------------
+  //
+  // Opt-in via --prosody. Everything here is local: FFmpeg decodes the audio to
+  // 16 kHz mono PCM and the F0 estimation is our own YIN implementation
+  // (src/media/pitch.ts). No service is contacted and nothing is uploaded.
+  //
+  // With the flag absent, `toneStylesByCue` stays undefined and every word
+  // resolves through exactly the same path it did before this feature existed.
+  let prosody: ProsodyAnalysis | null = null;
+  let theme = NEUTRAL_THEME;
+  let toneStylesByCue: Map<number, Map<number, ToneStyle>> | undefined;
+
+  if (opts.prosody) {
+    log.step('Analysing local audio prosody (loudness + F0 pitch)');
+    theme = loadCaptionTheme(opts.captionTheme);
+    log.info(`theme ${theme.source} (minConfidence ${theme.minConfidence})`);
+
+    const cacheKey = `${inputFp.sha256}-${theme.version}`;
+    const cached = loadProsodyCache(cacheKey);
+    if (cached) {
+      prosody = cached;
+      log.info('reusing cached prosody measurements (local cache, no re-analysis)');
+    } else {
+      // Pitch needs a fourth FFmpeg pass over the audio, hence its own call
+      // rather than reusing Auto Trim's analysis.
+      const withPitch = await analyzeAudio(inputPath, info.durationSec, { pitch: true });
+      prosody = analyzeProsody(transcript, withPitch);
+      if (prosody.available) saveProsodyCache(cacheKey, prosody);
+    }
+
+    if (!prosody.available) {
+      log.warn(`prosody unavailable: ${prosody.reason ?? 'no measurement'} — captions use the base style`);
+    } else {
+      const voiced = prosody.words.filter((w) => w.features.f0Hz !== undefined).length;
+      log.info(
+        `${prosody.words.length} word(s) measured, ${voiced} with a usable F0 reading`,
+      );
+      if (voiced === 0) {
+        log.warn(
+          'no pitch could be measured — tone falls back to loudness and rate only, ' +
+            'which is a weaker signal',
+        );
+      }
+      const counts = new Map<string, number>();
+      for (const w of prosody.words) counts.set(w.tone, (counts.get(w.tone) ?? 0) + 1);
+      log.info(
+        'tones: ' + [...counts.entries()].map(([t, n]) => `${t} ${n}`).join(', '),
+      );
+
+      // Map prosody (indexed over kept words) onto cue-local word indices.
+      toneStylesByCue = new Map();
+      const byTime = new Map<string, (typeof prosody.words)[number]>();
+      for (const w of prosody.words) byTime.set(`${w.start}:${w.end}`, w);
+      let styled = 0;
+      for (const cue of cues) {
+        const forCue = new Map<number, ToneStyle>();
+        cue.words.forEach((word, i) => {
+          const p = byTime.get(`${word.start}:${word.end}`);
+          if (!p) return;
+          const style = toneStyleFor(theme, p.tone, p.confidence);
+          if (style) { forCue.set(i, style); styled++; }
+        });
+        if (forCue.size > 0) toneStylesByCue.set(cue.index, forCue);
+      }
+      log.info(`${styled} word(s) styled by tone (the rest keep the base style)`);
+
+      // ---- --diagnostics: the full per-word table --------------------------
+      // Works entirely offline: it needs a transcript and local audio, never
+      // an API. Measurements and style decisions only — nothing secret.
+      if (opts.showDiagnostics) {
+        const baseStyle = resolveStyle(opts.style, resolveOutput(opts.aspect, info).height, {
+          ...(opts.font !== undefined ? { fontFamily: opts.font } : {}),
+          ...(opts.activeColor !== undefined ? { activeColor: opts.activeColor } : {}),
+          ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
+        });
+        const rows: ProsodyDiagnosticRow[] = prosody.words.map((w) => {
+          const toneStyle = toneStyleFor(theme, w.tone, w.confidence);
+          const resolved = resolveWordStyle(baseStyle, false, {
+            activeScale: opts.activeScale,
+            activeBold: opts.activeBold,
+            ...(toneStyle ? { tone: toneStyle } : {}),
+          });
+          return {
+            index: w.index,
+            word: transcript.words[w.index]?.text ?? '',
+            start: w.start,
+            end: w.end,
+            rmsDb: w.features.rmsDb,
+            f0Hz: w.features.f0Hz ?? null,
+            speakingRate: w.features.speakingRate,
+            tone: w.tone,
+            confidence: w.confidence,
+            font: resolved.fontFamily,
+            bold: resolved.bold,
+            scale: resolved.scale,
+            color: resolved.color,
+            styled: toneStyle !== undefined,
+          };
+        });
+        log.info('prosody diagnostics (local measurements → resolved style):');
+        for (const line of formatProsodyDiagnostics(rows).split('\n')) log.info(line);
+        log.info(
+          '  F0 "—" means no usable pitch reading: unvoiced, too quiet, or too ' +
+            'noisy. Absent is NOT low pitch.',
+        );
+      }
+    }
+  }
+
   const outBase = opts.output
     ? resolve(opts.output)
     : join(process.cwd(), `${basename(inputPath, extname(inputPath))}-captioned.mp4`);
@@ -1006,6 +1122,9 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       activeScale: opts.activeScale,
       activeBold: opts.activeBold,
       highlight: opts.highlight,
+      // undefined unless --prosody ran, which is what keeps the default path
+      // byte-identical to the pre-prosody renderer.
+      ...(toneStylesByCue ? { toneStylesByCue } : {}),
     };
     const plans = planCaptionFrames(cues, { width, height, highlight: opts.highlight });
     log.info(`${plans.length} caption frames`);

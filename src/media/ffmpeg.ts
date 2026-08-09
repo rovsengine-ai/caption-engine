@@ -69,6 +69,68 @@ export function run(
   });
 }
 
+export interface BinaryRunResult {
+  code: number;
+  stdout: Buffer;
+  stderr: string;
+}
+
+/**
+ * Like `run`, but keeps stdout as raw bytes.
+ *
+ * `run` accumulates stdout with `String(chunk)`, which is correct for FFmpeg's
+ * textual metadata output and destroys anything binary: bytes that are not
+ * valid UTF-8 become U+FFFD and cannot be recovered. Decoding PCM through that
+ * path yields a waveform of replacement characters, so pitch analysis needs its
+ * own capture.
+ *
+ * `maxBytes` is a hard ceiling, because raw audio is large: 16 kHz mono 16-bit
+ * is ~1.9 MB per minute, so a two-hour lecture would be ~230 MB in one Buffer.
+ * Hitting the cap truncates rather than throwing — a partial pitch track is
+ * still useful, and it is reported so callers know the analysis is partial.
+ */
+export function runBinary(
+  bin: string,
+  args: string[],
+  opts: { timeoutMs?: number; maxBytes?: number } = {},
+): Promise<BinaryRunResult & { truncated: boolean }> {
+  const maxBytes = opts.maxBytes ?? 512 * 1024 * 1024;
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let truncated = false;
+    let stderr = '';
+    let timer: NodeJS.Timeout | undefined;
+
+    if (opts.timeoutMs) {
+      timer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        reject(new FfmpegError(`${bin} timed out after ${opts.timeoutMs}ms`, args, stderr));
+      }, opts.timeoutMs);
+    }
+
+    proc.stdout.on('data', (d: Buffer) => {
+      if (total >= maxBytes) { truncated = true; return; }
+      chunks.push(d);
+      total += d.length;
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += String(d);
+      if (stderr.length > 400_000) stderr = stderr.slice(-200_000);
+    });
+    proc.on('error', (err) => {
+      if (timer) clearTimeout(timer);
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') reject(new FfmpegMissingError(bin));
+      else reject(err);
+    });
+    proc.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code: code ?? -1, stdout: Buffer.concat(chunks), stderr, truncated });
+    });
+  });
+}
+
 export async function ffmpeg(
   args: string[],
   opts: { onStderr?: (c: string) => void; timeoutMs?: number } = {},

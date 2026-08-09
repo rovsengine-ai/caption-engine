@@ -1,0 +1,46 @@
+{
+  "$comment": [
+    "Tone → visual style. Edited by hand; no code change needed to retune it.",
+    "",
+    "A tone is a description of DELIVERY measured locally from the audio (loudness",
+    "and pitch relative to the speaker's own median, speaking rate, pauses). It is",
+    "NOT emotion recognition. Keep the styling restrained: if a viewer can tell",
+    "which rule fired, the rule is too loud.",
+    "",
+    "Fields, all optional per tone:",
+    "  fontFamily  a family name from `caption-engine fonts`. Omit to inherit.",
+    "  bold        true forces the real bold face. Omit to inherit.",
+    "  scale       multiplier on the word's size. Keep within 0.9-1.15;",
+    "              anything larger fights the active-word scale and reflows lines.",
+    "  color       #RRGGBB. Omit to inherit the base caption colour.",
+    "",
+    "minConfidence gates the whole system: a word whose tone was classified below",
+    "this keeps the base style. Raise it if styling feels twitchy, lower it if",
+    "nothing ever triggers. Tones are only applied with --prosody."
+  ],
+  "version": 1,
+  "minConfidence": 0.6,
+  "tones": {
+    "neutral": {},
+    "calm": {
+      "scale": 1.0,
+      "color": "#DCE6F0"
+    },
+    "excited": {
+      "bold": true,
+      "scale": 1.08,
+      "color": "#FFD166"
+    },
+    "emphatic": {
+      "bold": true,
+      "scale": 1.05
+    },
+    "fast": {
+      "scale": 0.97
+    },
+    "soft": {
+      "scale": 0.98,
+      "color": "#B8C4D0"
+    }
+  }
+}
