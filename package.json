@@ -16,6 +16,7 @@
     "doctor": "npm run build && node dist/src/cli.js doctor",
     "demo": "npm run build && node dist/demo/pipeline.js",
     "visual": "npm run build && node dist/demo/visual-check.js",
+    "caption:hinglish": "node scripts/caption-hinglish.mjs",
     "fonts:install": "node scripts/install-fonts.mjs",
     "shaping:probe": "python3 tools/shaping_probe.py",
     "test:raster": "npm run build && node --test \"dist/test/rasteriser.test.js\"",

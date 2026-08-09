@@ -15,10 +15,35 @@
  *  - Hindi "matlab" (मतलब) and Telugu "ante" (అంటే) are BOTH fillers AND real
  *    words meaning "meaning/that is". Cutting every instance destroys sentences.
  *    See `ambiguous` — these are only cut with additional evidence (see index.ts).
+ *
+ * ---------------------------------------------------------------------------
+ * THE RULE FOR `always`
+ * ---------------------------------------------------------------------------
+ * A token belongs in `always` only if it is **not a word in the language**.
+ * "um", "hmm", "erm" qualify: they are noises. A token that is a real word in
+ * ANY of the lexicons loaded for a language does not qualify, no matter how
+ * often it is also used as a hesitation.
+ *
+ * This rule exists because it was broken. An audit found these in `always`,
+ * being cut with no evidence whatsoever:
+ *
+ *   हूँ   (hi)  "am"          — मैं ठीक हूँ  →  मैं ठीक
+ *   आ/આ/ఆ/ಆ/ആ  "this"/"that" — આ ઘર બહુ સરસ છે  →  ઘર બહુ સરસ છે
+ *   haan  (hi)  "yes"
+ *   এ     (bn)  "this"
+ *   ਆ     (pa)  "come"
+ *
+ * The English list was correct — "a" was never in it — which is exactly why the
+ * bug survived: the language everyone tests in was fine. Every entry below now
+ * carries a note when it is ambiguous, so the next person to edit this file has
+ * to think about it.
  */
 
 export interface FillerLexicon {
-  /** Safe to cut whenever they appear standalone. */
+  /**
+   * Pure hesitation noises. Cut on sight — these are not words.
+   * Adding a real word here is a bug: see the rule above.
+   */
   always: string[];
   /** Real words that are ALSO used as fillers. Require extra evidence to cut. */
   ambiguous: string[];
@@ -30,59 +55,84 @@ const EN: FillerLexicon = {
 };
 
 const HI: FillerLexicon = {
-  always: ['हम्म', 'अं', 'अ', 'उम', 'एर', 'हूँ'],
-  ambiguous: ['मतलब', 'यानी', 'वो', 'तो', 'बस', 'अच्छा', 'ठीक है', 'क्या बोलते हैं'],
+  always: ['हम्म', 'अं', 'उम', 'एर'],
+  ambiguous: [
+    'हूँ', 'हूं', // "am" — मैं ठीक हूँ. A core verb form, never cut without a pause.
+    'अ', // bare vowel letter; ASR emits it for hesitation but it can be a fragment
+    'आ', // "come" (imperative), also a hesitation drawl
+    'मतलब', 'यानी', 'वो', 'तो', 'बस', 'अच्छा', 'ठीक है', 'क्या बोलते हैं',
+  ],
 };
 
 /** Romanised Hindi — what Hinglish transcripts actually look like. */
 const HI_ROMAN: FillerLexicon = {
-  always: ['hmm', 'umm', 'um', 'uh', 'haan', 'arre'],
-  ambiguous: ['matlab', 'yaani', 'yaar', 'toh', 'bas', 'accha', 'theek hai', 'kya bolte hain', 'woh'],
+  always: ['hmm', 'umm', 'um', 'uh'],
+  ambiguous: [
+    'haan', 'haa', // "yes" — an answer, not a noise
+    'arre', // interjection, but carries emphasis
+    'aa', // "come", and the romanisation of आ
+    'matlab', 'yaani', 'yaar', 'toh', 'bas', 'accha', 'theek hai', 'kya bolte hain', 'woh',
+  ],
 };
 
 const TE: FillerLexicon = {
-  always: ['హ్మ్', 'అమ్', 'ఆ', 'ఉమ్'],
-  ambiguous: ['అంటే', 'ఏంటంటే', 'అది', 'కదా', 'మరి', 'సరే'],
+  always: ['హ్మ్', 'అమ్', 'ఉమ్'],
+  ambiguous: [
+    'ఆ', // "that" — ఆ పుస్తకం = that book. Extremely common demonstrative.
+    'అంటే', 'ఏంటంటే', 'అది', 'కదా', 'మరి', 'సరే',
+  ],
 };
 
 const TE_ROMAN: FillerLexicon = {
-  always: ['hmm', 'umm', 'aa', 'um'],
-  ambiguous: ['ante', 'antey', 'entante', 'adi', 'kada', 'mari', 'sare'],
+  always: ['hmm', 'umm', 'um'],
+  ambiguous: ['aa', 'ante', 'antey', 'entante', 'adi', 'kada', 'mari', 'sare'],
 };
 
 const KN: FillerLexicon = {
-  always: ['ಹ್ಮ್', 'ಅಂ', 'ಆ', 'ಉಮ್'],
-  ambiguous: ['ಅಂದರೆ', 'ಅದು', 'ಅಲ್ವಾ', 'ಸರಿ', 'ಮತ್ತೆ'],
+  always: ['ಹ್ಮ್', 'ಅಂ', 'ಉಮ್'],
+  ambiguous: [
+    'ಆ', // "that" — demonstrative
+    'ಅಂದರೆ', 'ಅದು', 'ಅಲ್ವಾ', 'ಸರಿ', 'ಮತ್ತೆ',
+  ],
 };
 
 const KN_ROMAN: FillerLexicon = {
-  always: ['hmm', 'umm', 'aa', 'um'],
-  ambiguous: ['andre', 'adu', 'alva', 'sari', 'matte'],
+  always: ['hmm', 'umm', 'um'],
+  ambiguous: ['aa', 'andre', 'adu', 'alva', 'sari', 'matte'],
 };
 
 const TA: FillerLexicon = {
-  always: ['ஹ்ம்', 'அம்', 'ஆ', 'உம்'],
-  ambiguous: ['அப்புறம்', 'அது', 'இல்ல', 'சரி', 'என்னன்னா', 'அப்படி'],
+  always: ['ஹ்ம்', 'அம்', 'உம்'],
+  ambiguous: [
+    'ஆ', // interjection, but also a question/affirmation particle
+    'அப்புறம்', 'அது', 'இல்ல', 'சரி', 'என்னன்னா', 'அப்படி',
+  ],
 };
 
 const TA_ROMAN: FillerLexicon = {
-  always: ['hmm', 'umm', 'um', 'aa'],
-  ambiguous: ['appuram', 'adhu', 'illa', 'sari', 'ennanna', 'appadi'],
+  always: ['hmm', 'umm', 'um'],
+  ambiguous: ['aa', 'appuram', 'adhu', 'illa', 'sari', 'ennanna', 'appadi'],
 };
 
 const ML: FillerLexicon = {
-  always: ['ഹ്മ്', 'അം', 'ആ', 'ഉം'],
-  ambiguous: ['അതായത്', 'അത്', 'എന്നുവച്ചാൽ', 'ശരി', 'പിന്നെ'],
+  always: ['ഹ്മ്', 'അം', 'ഉം'],
+  ambiguous: [
+    'ആ', // "that" — demonstrative
+    'അതായത്', 'അത്', 'എന്നുവച്ചാൽ', 'ശരി', 'പിന്നെ',
+  ],
 };
 
 const ML_ROMAN: FillerLexicon = {
-  always: ['hmm', 'umm', 'um', 'aa'],
-  ambiguous: ['athayath', 'athu', 'ennuvachal', 'sari', 'pinne'],
+  always: ['hmm', 'umm', 'um'],
+  ambiguous: ['aa', 'athayath', 'athu', 'ennuvachal', 'sari', 'pinne'],
 };
 
 const BN: FillerLexicon = {
-  always: ['হুম', 'উম', 'আহ', 'এ'],
-  ambiguous: ['মানে', 'যেটা', 'তো', 'আচ্ছা', 'ঠিক আছে'],
+  always: ['হুম', 'উম', 'আহ'],
+  ambiguous: [
+    'এ', // "this" / "he" — a pronoun, not a noise
+    'মানে', 'যেটা', 'তো', 'আচ্ছা', 'ঠিক আছে',
+  ],
 };
 
 const BN_ROMAN: FillerLexicon = {
@@ -91,33 +141,42 @@ const BN_ROMAN: FillerLexicon = {
 };
 
 const GU: FillerLexicon = {
-  always: ['હમ્મ', 'ઉમ', 'આ'],
-  ambiguous: ['મતલબ', 'એટલે', 'પછી', 'સારું', 'તો'],
+  always: ['હમ્મ', 'ઉમ'],
+  ambiguous: [
+    'આ', // "this" — આ ઘર = this house. Among the most common words in Gujarati.
+    'મતલબ', 'એટલે', 'પછી', 'સારું', 'તો',
+  ],
 };
 
 const GU_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
-  ambiguous: ['matlab', 'etle', 'pachhi', 'saru', 'toh'],
+  ambiguous: ['aa', 'matlab', 'etle', 'pachhi', 'saru', 'toh'],
 };
 
 const PA: FillerLexicon = {
-  always: ['ਹਮ੍ਮ', 'ਉਮ', 'ਆ'],
-  ambiguous: ['ਮਤਲਬ', 'ਯਾਨੀ', 'ਫਿਰ', 'ਚੰਗਾ', 'ਤਾਂ'],
+  always: ['ਹਮ੍ਮ', 'ਉਮ'],
+  ambiguous: [
+    'ਆ', // "come" (imperative)
+    'ਮਤਲਬ', 'ਯਾਨੀ', 'ਫਿਰ', 'ਚੰਗਾ', 'ਤਾਂ',
+  ],
 };
 
 const PA_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
-  ambiguous: ['matlab', 'yaani', 'phir', 'changa', 'taan'],
+  ambiguous: ['aa', 'matlab', 'yaani', 'phir', 'changa', 'taan'],
 };
 
 const MR: FillerLexicon = {
-  always: ['हम्म', 'अं', 'आ', 'उम'],
-  ambiguous: ['म्हणजे', 'तर', 'बरं', 'असं', 'काय'],
+  always: ['हम्म', 'अं', 'उम'],
+  ambiguous: [
+    'आ', // hesitation drawl, but also a real form
+    'म्हणजे', 'तर', 'बरं', 'असं', 'काय',
+  ],
 };
 
 const MR_ROMAN: FillerLexicon = {
   always: ['hmm', 'umm', 'um'],
-  ambiguous: ['mhanje', 'tar', 'bara', 'asa', 'kay'],
+  ambiguous: ['aa', 'mhanje', 'tar', 'bara', 'asa', 'kay'],
 };
 
 /**

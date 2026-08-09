@@ -18,6 +18,10 @@ export interface CliOptions {
   autoTrim: boolean;
   trimSilence: number;
   keepFillers: boolean;
+  /** Seconds of audio kept on each side of a speech cut. */
+  cutHandles?: number;
+  /** Seconds of fade at each cut join. 0 disables. */
+  cutFade?: number;
   clips: boolean;
   maxWordsPerCue?: number;
   fontSize?: number;
@@ -52,6 +56,8 @@ export interface CliOptions {
   cutsIn?: string;
   cutsOut?: string;
   workDir?: string;
+  /** Reuse a transcript/cut file even when its input fingerprint does not match. */
+  allowStale: boolean;
   dryRun: boolean;
   verbose: boolean;
   json: boolean;
@@ -113,6 +119,14 @@ AUTO TRIM
       --auto-trim           Remove silences, fillers and false starts
       --trim-silence <sec>  Gap length treated as silence        (default: 0.7)
       --keep-fillers        Trim silence only, leave filler words in
+      --cut-handles <sec>   Audio kept on each side of a speech cut  (default: 0.04)
+                            ASR word boundaries are estimates; cutting exactly on
+                            them clips the final consonant. Applied to the cut list
+                            before captions are timed, so audio and captions stay
+                            in step. 0 cuts exactly on the ASR boundary.
+      --cut-fade <sec>      Fade at each cut join                    (default: 0.012)
+                            Removes the click where two segments meet. A level
+                            shape only — it never changes a duration. 0 disables.
       --cuts-out <file>     Write the proposed cut list as JSON for review
       --cuts-in <file>      Apply a reviewed cut list (set "restored": true to keep a cut)
       --review-cuts         Propose cuts, write --cuts-out, then STOP before rendering
@@ -147,6 +161,11 @@ ENCODING
 
 OTHER
       --work-dir <dir>      Where intermediate files go (default: a temp dir)
+      --allow-stale         Reuse a --transcript-in / --cuts-in file even when its
+                            recorded input fingerprint does not match this media.
+                            Off by default: replacing a video while keeping the
+                            same filename otherwise silently reuses the old take's
+                            transcript, and every caption lands at the wrong time.
       --dry-run             Show the plan without transcribing or rendering
       --json                Machine-readable output
   -v, --verbose             Verbose logging
@@ -250,6 +269,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
     codeSwitching: false,
     showDiagnostics: false,
     reviewCuts: false,
+    allowStale: false,
     dryRun: false,
     verbose: false,
     json: false,
@@ -308,6 +328,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--auto-trim': o.autoTrim = true; break;
       case '--trim-silence': o.trimSilence = num(a, next, 0.05, 30); i++; break;
       case '--keep-fillers': o.keepFillers = true; break;
+      case '--cut-handles': o.cutHandles = num(a, next, 0, 1); i++; break;
+      case '--cut-fade': o.cutFade = num(a, next, 0, 0.5); i++; break;
       case '--clips': o.clips = true; break;
       case '--transcript': // alias, natural with the `render` verb
       case '--transcript-in': o.transcriptIn = needValue(a, next); i++; break;
@@ -329,6 +351,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--cuts-in': o.cutsIn = needValue(a, next); i++; break;
       case '--cuts-out': o.cutsOut = needValue(a, next); i++; break;
       case '--work-dir': o.workDir = needValue(a, next); i++; break;
+      case '--allow-stale': o.allowStale = true; break;
       case '--dry-run': o.dryRun = true; break;
       case '--json': o.json = true; break;
       case '-v': case '--verbose': o.verbose = true; break;

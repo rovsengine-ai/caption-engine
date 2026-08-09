@@ -8,6 +8,33 @@ import { CaptionEngineError } from '../errors.js';
  * injected `LlmComplete`, so swapping in another provider means writing a
  * function of the same shape rather than changing any core code.
  */
+/**
+ * Pull a short, human-readable reason out of an error response.
+ *
+ * Only the provider's structured `error.message` is used, capped and stripped
+ * of anything token-shaped. If the body is not the expected JSON, nothing is
+ * reported beyond the status code — an opaque error is better than one that
+ * might carry a credential.
+ */
+export async function safeErrorDetail(res: {
+  text(): Promise<string>;
+}): Promise<string> {
+  const body = await res.text().catch(() => '');
+  if (!body) return '';
+  let msg: unknown;
+  try {
+    msg = (JSON.parse(body) as { error?: { message?: unknown } })?.error?.message;
+  } catch {
+    return '';
+  }
+  if (typeof msg !== 'string') return '';
+  return msg
+    // Anything long and token-shaped goes, whatever provider invented it.
+    .replace(/\b[A-Za-z0-9_-]{20,}\b/g, '[redacted]')
+    .slice(0, 200)
+    .trim();
+}
+
 export function makeAnthropicCompletion(
   apiKey: string,
   model = 'claude-sonnet-4-5',
@@ -28,10 +55,17 @@ export function makeAnthropicCompletion(
     });
 
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
+      // Never interpolate a raw provider body into an error.
+      //
+      // A rejected request can echo the credential back — some gateways include
+      // the offending header in their 401 payload. The CLI redacts secrets
+      // before printing, but constructing the string at all means it can reach
+      // a log file, a --json consumer, or a bug report that skips that path.
+      // Take the provider's own message field if it looks safe, nothing else.
+      const detail = await safeErrorDetail(res);
       throw new CaptionEngineError(
-        `Clip scoring request failed (${res.status}): ${body.slice(0, 300)}`,
-        res.status === 401
+        `Clip scoring request failed (${res.status}${detail ? `: ${detail}` : ''}).`,
+        res.status === 401 || res.status === 403
           ? 'Check ANTHROPIC_API_KEY.'
           : 'Retry, or omit --clips to skip clip detection.',
       );

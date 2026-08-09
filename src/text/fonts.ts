@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, delimiter as PATH_DELIMITER } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import type { ScriptName } from './script.js';
@@ -50,19 +50,63 @@ function assetFontDir(): string {
   return resolve(__dirname, '../../../assets/fonts');
 }
 
-function candidateDirs(): string[] {
-  const dirs: string[] = [assetFontDir()];
-  if (process.env.FONT_DIR) dirs.push(...process.env.FONT_DIR.split(':').filter(Boolean));
-  const home = process.env.HOME ?? '';
+/**
+ * Split a FONT_DIR value into directories.
+ *
+ * The separator is the platform's PATH delimiter — `;` on Windows, `:` on
+ * macOS/Linux — never a hardcoded `:`. Splitting `C:\fonts;D:\more` on `:`
+ * yields `["C", "\fonts;D", "\more"]`, i.e. every Windows FONT_DIR silently
+ * resolves to nothing and the user gets "no font found" with no clue why.
+ *
+ * `delim` is injectable so the Windows behaviour can be tested on any host.
+ */
+export function splitFontDirs(raw: string | undefined, delim: string = PATH_DELIMITER): string[] {
+  if (!raw) return [];
+  return raw
+    .split(delim)
+    .map((d) => d.trim())
+    .filter(Boolean);
+}
+
+/**
+ * User/system font directories to scan, in addition to the vendored set.
+ * `env` is injectable so platform behaviour can be tested on any host.
+ */
+export function systemFontDirs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const dirs: string[] = [];
+  // HOME on POSIX, USERPROFILE on Windows.
+  const home = env.HOME || env.USERPROFILE || '';
   if (home) {
     dirs.push(
-      join(home, '.local/share/fonts'),
+      join(home, '.local', 'share', 'fonts'),
       join(home, '.fonts'),
-      join(home, 'Library/Fonts'),
+      join(home, 'Library', 'Fonts'),
     );
   }
   dirs.push('/usr/share/fonts', '/usr/local/share/fonts', '/Library/Fonts', '/System/Library/Fonts');
+
+  // Windows: per-user fonts (no admin rights needed) then the machine store.
+  const localAppData = env.LOCALAPPDATA;
+  if (localAppData) dirs.push(join(localAppData, 'Microsoft', 'Windows', 'Fonts'));
+  const winDir = env.SystemRoot || env.WINDIR;
+  if (winDir) dirs.push(join(winDir, 'Fonts'));
+
+  return dirs;
+}
+
+function candidateDirs(): string[] {
+  const dirs: string[] = [
+    // Vendored fonts always win: reproducible renders across machines.
+    assetFontDir(),
+    // Absolute-resolved so a relative FONT_DIR behaves the same as an absolute one.
+    ...splitFontDirs(process.env.FONT_DIR).map((d) => resolve(d)),
+    ...systemFontDirs(),
+  ];
+  const seen = new Set<string>();
   return dirs.filter((d) => {
+    const key = process.platform === 'win32' ? d.toLowerCase() : d;
+    if (seen.has(key)) return false;
+    seen.add(key);
     try { return existsSync(d); } catch { return false; }
   });
 }
@@ -95,9 +139,32 @@ function allFontFiles(): string[] {
   return files;
 }
 
+/**
+ * Basename of a font path. Splits on BOTH separators rather than using
+ * path.basename(), because a `C:\fonts\Noto.ttf` string must resolve the same
+ * way when tests run on Linux as it does on the Windows host that produced it.
+ */
+export function fontBasename(p: string): string {
+  const parts = p.split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
 function normStem(p: string): string {
-  const base = p.split('/').pop() ?? p;
-  return base.replace(/\.(ttf|otf|ttc)$/i, '').toLowerCase().replace(/[-_ ]/g, '');
+  return fontBasename(p).replace(/\.(ttf|otf|ttc)$/i, '').toLowerCase().replace(/[-_ ]/g, '');
+}
+
+/**
+ * Is `child` inside `parent`? Separator- and case-tolerant, so the "vendored"
+ * label survives Windows drive-letter casing and mixed `/` vs `\`.
+ */
+export function isInside(child: string, parent: string): boolean {
+  const norm = (s: string) => {
+    const unified = s.replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    return process.platform === 'win32' ? unified.toLowerCase() : unified;
+  };
+  const c = norm(child);
+  const p = norm(parent);
+  return c === p || c.startsWith(p + '/');
 }
 
 function findByStems(stems: string[]): string | null {
@@ -185,7 +252,7 @@ export function resolveFont(
       path: found,
       script,
       bold,
-      source: found.startsWith(assetDir) ? 'vendored' : 'system',
+      source: isInside(found, assetDir) ? 'vendored' : 'system',
     };
     resolveCache.set(key, r);
     return r;
@@ -201,7 +268,8 @@ export function resolveFont(
 
   throw new MissingFontError(
     `No font found covering ${script}. Install one of: ${stems.join(', ')}, ` +
-      `or set FONT_DIR to a directory containing a suitable font. ` +
+      `or set FONT_DIR to a directory containing a suitable font ` +
+      `(separate multiple directories with "${PATH_DELIMITER}" on this platform). ` +
       `Run "npm run fonts:install" to fetch the bundled Noto set.`,
     script,
     stems,

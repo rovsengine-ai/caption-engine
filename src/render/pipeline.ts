@@ -52,6 +52,11 @@ export interface RenderJob {
   fps?: number;
   /** Kept portions of the ORIGINAL timeline. Empty/omitted = whole file. */
   segments?: Segment[];
+  /**
+   * Audio fade applied at each internal segment join, in seconds.
+   * Purely a level shape — it never changes a duration. 0 disables it.
+   */
+  cutFadeSec?: number;
   frames?: CaptionFrame[] | FrameSource;
   /** 0 = left, 0.5 = centre, 1 = right. Static crop by design. */
   cropFocusX?: number;
@@ -127,6 +132,15 @@ async function rasteriseRange(
 // Pass 1 — base video
 // ---------------------------------------------------------------------------
 
+/**
+ * Default fade at a cut join.
+ *
+ * 12 ms is long enough to remove the sample-step click and short enough that no
+ * listener perceives a level dip — roughly half a cycle at the lowest speech
+ * fundamental. Longer values start to sound like ducking on fast cuts.
+ */
+export const DEFAULT_CUT_FADE_SEC = 0.012;
+
 /** Build the base (uncaptioned) video on the OUTPUT timeline. */
 export function buildBaseArgs(job: RenderJob, outPath: string): string[] {
   const isAudioOnly = Boolean(job.backgroundColor);
@@ -145,11 +159,40 @@ export function buildBaseArgs(job: RenderJob, outPath: string): string[] {
   let aLabel = '0:a';
 
   if (segments.length > 0) {
+    // Short fades at internal joins.
+    //
+    // atrim slices at an arbitrary point in the waveform, so two segments butted
+    // together almost always step from one instantaneous sample value to a
+    // different one — an audible click, and the thing that makes machine-cut
+    // audio sound machine-cut.
+    //
+    // This is a LEVEL change, not a timing change: afade shapes samples inside
+    // the segment and does not shorten it. acrossfade would overlap segments and
+    // shorten the total, desynchronising every caption — which is why it is not
+    // used here. Durations, A/V sync and the caption timeline are untouched.
+    //
+    // The very first fade-in and the very last fade-out are skipped so the clip
+    // does not appear to fade up from nothing at its own start and end.
+    const fade = Math.max(0, job.cutFadeSec ?? DEFAULT_CUT_FADE_SEC);
+
     segments.forEach((s, i) => {
       if (!isAudioOnly) {
         parts.push(`[${vLabel}]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
       }
-      parts.push(`[0:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+
+      const segDur = s.end - s.start;
+      // Never let the two fades meet: on a very short segment that would duck
+      // the whole thing to near-silence. Truncate rather than round, so the
+      // emitted value can never exceed the safe bound after formatting.
+      const f = Math.floor(Math.min(fade, segDur / 3) * 10000) / 10000;
+      const fadeIn = f > 0 && i > 0;
+      const fadeOut = f > 0 && i < segments.length - 1;
+
+      const chain = [`atrim=start=${s.start}:end=${s.end}`, 'asetpts=PTS-STARTPTS'];
+      if (fadeIn) chain.push(`afade=t=in:st=0:d=${f.toFixed(4)}`);
+      if (fadeOut) chain.push(`afade=t=out:st=${(segDur - f).toFixed(4)}:d=${f.toFixed(4)}`);
+
+      parts.push(`[0:a]${chain.join(',')}[a${i}]`);
     });
     if (isAudioOnly) {
       parts.push(`${segments.map((_, i) => `[a${i}]`).join('')}concat=n=${segments.length}:v=0:a=1[acat]`);

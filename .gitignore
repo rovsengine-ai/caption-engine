@@ -1,17 +1,15 @@
 node_modules/
 dist/
-demo-out/
-.env
-*.log
-node_modules/
-dist/
 
+# Secrets — never commit these.
 .env
 .env.*
 !.env.example
 
 .DS_Store
+*.log
 
+# Media: inputs and rendered outputs stay out of git.
 *.mp4
 *.mov
 *.mkv
@@ -23,8 +21,37 @@ dist/
 outputs/
 demo-out/
 
+# Real test clips are supplied locally; tests skip when they are absent.
+test/fixtures/media/
+
+# Extracted frames and analysis caches (shot analysis writes here).
+frames/
+.cache/
+*.clips.json
+*.analysis.json
+*.png
+*.jpg
+*.jpeg
+!assets/**/*.png
+
+# Generated artifacts.
 fresh-*.json
 new-*.json
 test-*.json
 *-cuts.json
 *-transcript.json
+transcript.json
+cuts.json
+captions.srt
+current-data.json
+verify-sarvam.json
+verify-sarvam.srt
+
+# Debug scratch. Kept out of the repo; see docs/AUDIT.md for the untracking
+# command if any of these are still tracked from an earlier commit.
+dbg*.mjs
+tl.mjs
+memcheck.mjs
+resvgtest.mjs
+scratch/
+.gitignore.save

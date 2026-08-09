@@ -9,7 +9,10 @@ import { probeMedia, assertHasAudio, type MediaInfo } from '../media/probe.js';
 import { extractAudio } from '../media/extract.js';
 import { assertBinary, FFMPEG, FFPROBE } from '../media/ffmpeg.js';
 import { providerFromEnv, assertWordTimings, type AsrProvider } from '../asr/index.js';
-import { autoTrim, applyTrim, keepSegments, DEFAULT_TRIM_OPTIONS } from '../autotrim/index.js';
+import {
+  autoTrim, applyTrim, applyHandles, snapCutsToFrames, keepSegments,
+  DEFAULT_TRIM_OPTIONS, DEFAULT_CUT_HANDLE_SEC,
+} from '../autotrim/index.js';
 import { groupIntoCues } from '../captions/group.js';
 import { buildAss, buildSrt } from '../captions/ass.js';
 import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
@@ -17,6 +20,16 @@ import { resolveStyle, resolveOutput } from '../captions/style.js';
 import { renderVideo } from '../render/pipeline.js';
 import { initShaper } from '../text/shaper.js';
 import { getLanguage } from '../config/languages.js';
+import {
+  fingerprintInput,
+  makeStamp,
+  verifyStamp,
+  explainVerdict,
+  transcriptConfigHash,
+  cutsConfigHash,
+  type ArtifactStamp,
+  type InputFingerprint,
+} from '../config/fingerprint.js';
 
 export interface Reporter {
   step(msg: string): void;
@@ -105,16 +118,72 @@ function collectKeyterms(opts: CliOptions): string[] {
   return [...terms];
 }
 
+/**
+ * Refuse a cached artifact that was not derived from this exact input.
+ *
+ * The dangerous case is silent, not loud: you re-export a video under the same
+ * filename and reuse yesterday's transcript, so the captions are from the
+ * previous take and every timestamp is subtly wrong. That must be an error,
+ * not a warning.
+ *
+ * A file with no stamp at all is only warned about — it was written by an
+ * earlier version of this tool and refusing it would break existing workflows.
+ */
+function checkStamp(
+  doc: unknown,
+  kind: ArtifactStamp['kind'],
+  input: InputFingerprint,
+  cfgHash: string,
+  file: string,
+  allowStale: boolean | undefined,
+  log: Reporter,
+): void {
+  const stamp = (doc as { _engine?: ArtifactStamp } | null)?._engine;
+  const verdict = verifyStamp(stamp, input, cfgHash);
+  if (verdict.ok) return;
+
+  if (verdict.code === 'unstamped') {
+    log.warn(
+      `${basename(file)} has no input fingerprint (written by an older version). ` +
+        `Cannot confirm it belongs to this ${input.name} — verify the result.`,
+    );
+    return;
+  }
+
+  if (allowStale) {
+    log.warn(`--allow-stale: using ${basename(file)} anyway. ${verdict.detail}`);
+    return;
+  }
+
+  const noun = kind === 'cuts' ? 'cut list' : kind;
+  throw new CaptionEngineError(
+    `Refusing to reuse a ${noun} that does not match this input.`,
+    explainVerdict(verdict, file),
+  );
+}
+
+/**
+ * Extract the cut array from a reviewed cut file.
+ *
+ * Accepts both shapes: the current `{ _engine, cuts: [...] }` document and the
+ * bare `[...]` array written by earlier versions. Reading old files must keep
+ * working — the stamp is an addition, not a migration.
+ */
+export function cutsArrayOf(doc: unknown): Array<Partial<Cut>> {
+  if (Array.isArray(doc)) return doc as Array<Partial<Cut>>;
+  if (doc && typeof doc === 'object' && Array.isArray((doc as { cuts?: unknown }).cuts)) {
+    return (doc as { cuts: Array<Partial<Cut>> }).cuts;
+  }
+  throw new CaptionEngineError(
+    'Cut file must contain a JSON array of cuts, or an object with a "cuts" array.',
+    'Use the file written by --cuts-out and edit "restored" fields.',
+  );
+}
+
 /** Merge a reviewed cut list back onto freshly computed cuts, by id. */
 function applyReviewedCuts(trim: TrimResult, reviewed: unknown): { restored: number } {
-  if (!Array.isArray(reviewed)) {
-    throw new CaptionEngineError(
-      'Cut file must contain a JSON array of cuts.',
-      'Use the file written by --cuts-out and edit "restored" fields.',
-    );
-  }
   const byId = new Map<string, boolean>();
-  for (const c of reviewed as Array<Partial<Cut>>) {
+  for (const c of cutsArrayOf(reviewed)) {
     if (typeof c?.id === 'string') byId.set(c.id, Boolean(c.restored));
   }
   let restored = 0;
@@ -162,6 +231,17 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     }
   }
 
+  // Fingerprint the input once. Every cached artifact is stamped with this and
+  // refused if it does not match, so replacing a video while keeping its
+  // filename cannot silently reuse the previous take's transcript or cuts.
+  const inputFp = await fingerprintInput(inputPath, { durationSec: info.durationSec });
+  const trConfig = transcriptConfigHash({
+    provider: opts.provider ?? process.env.ASR_PROVIDER ?? 'elevenlabs',
+    language: opts.language,
+    codeSwitching: opts.codeSwitching,
+    keyterms: collectKeyterms(opts),
+  });
+
   const outputs: Record<string, string> = {};
   let usedRasteriser = 'none (no video output)';
   // The transcript exactly as the ASR produced it, before any romanisation.
@@ -206,6 +286,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         `Could not parse ${opts.transcriptIn}: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
+    checkStamp(parsed, 'transcript', inputFp, trConfig, opts.transcriptIn, opts.allowStale, log);
     transcript = validateTranscript(parsed);
     log.info(
       `${transcript.words.length} words · ${transcript.language}` +
@@ -277,7 +358,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
   if (opts.transcriptOut) {
     mkdirSync(dirname(resolve(opts.transcriptOut)), { recursive: true });
-    writeFileSync(opts.transcriptOut, JSON.stringify(transcript, null, 2), 'utf8');
+    // `_engine` rides alongside the transcript rather than inside it, so the
+    // schema validator and every existing consumer are unaffected.
+    const stamped = { ...transcript, _engine: makeStamp('transcript', inputFp, trConfig) };
+    writeFileSync(opts.transcriptOut, JSON.stringify(stamped, null, 2), 'utf8');
     outputs.transcript = resolve(opts.transcriptOut);
     log.info(`transcript → ${outputs.transcript}`);
   }
@@ -414,6 +498,11 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
   if (opts.autoTrim) {
     log.step('Auto Trim');
+    const cutsCfg = cutsConfigHash({
+      trimSilence: opts.trimSilence,
+      keepFillers: opts.keepFillers,
+      language: transcript.language,
+    });
     const trim = autoTrim(transcript, {
       ...DEFAULT_TRIM_OPTIONS,
       maxSilenceSec: opts.trimSilence,
@@ -427,20 +516,48 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         throw new CaptionEngineError(`Cut file not found: ${opts.cutsIn}`);
       }
       const reviewed = JSON.parse(readFileSync(opts.cutsIn, 'utf8'));
+      checkStamp(reviewed, 'cuts', inputFp, cutsCfg, opts.cutsIn, opts.allowStale, log);
       restored = applyReviewedCuts(trim, reviewed).restored;
       log.info(`applied review: ${restored} cut(s) restored`);
     }
 
     if (opts.cutsOut) {
       mkdirSync(dirname(resolve(opts.cutsOut)), { recursive: true });
-      writeFileSync(opts.cutsOut, JSON.stringify(trim.cuts, null, 2), 'utf8');
+      writeFileSync(
+        opts.cutsOut,
+        JSON.stringify({ _engine: makeStamp('cuts', inputFp, cutsCfg), cuts: trim.cuts }, null, 2),
+        'utf8',
+      );
       outputs.cuts = resolve(opts.cutsOut);
       log.info(`cut list → ${outputs.cuts}  (set "restored": true to keep a cut)`);
     }
 
-    const active = trim.cuts.filter((c) => !c.restored);
-    // Recompute from the post-review cut set so the reported numbers match
-    // what will actually be rendered.
+    // Shape the cuts BEFORE reporting them.
+    //
+    // Handles and frame snapping both change how much is actually removed, so
+    // computing the summary from the raw proposals would print numbers that do
+    // not match the file the user ends up with. `--cuts-out` above deliberately
+    // records the unshaped proposals: those are what the reviewer reasons about
+    // and what `--cuts-in` matches by id.
+    const handleSec = opts.cutHandles ?? DEFAULT_CUT_HANDLE_SEC;
+    const shaped = snapCutsToFrames(applyHandles(trim, handleSec), info.fps);
+
+    if (handleSec > 0 || info.fps) {
+      const kept = trim.secondsRemoved - shaped.secondsRemoved;
+      if (kept > 0.001) {
+        log.info(
+          `smooth cuts: ${(handleSec * 1000).toFixed(0)}ms handles` +
+            (info.fps ? ` + ${info.fps}fps snapping` : '') +
+            ` — keeping ${kept.toFixed(2)}s more audio`,
+        );
+      }
+      const dropped = trim.cuts.length - shaped.cuts.length;
+      if (dropped > 0) log.info(`  ${dropped} cut(s) too short to make safely — skipped`);
+    }
+
+    const active = shaped.cuts.filter((c) => !c.restored);
+    // Recompute from the post-review, post-shaping cut set so the reported
+    // numbers match what will actually be rendered.
     const removed = active.reduce((n, c) => n + (c.end - c.start), 0);
 
     // Break the summary down by reason. A bare total hides the thing users
@@ -506,8 +623,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       };
     }
 
-    workingTranscript = applyTrim(transcript, trim);
-    segments = keepSegments(trim);
+    // Captions and segments both come from `shaped`, so audio, video and text
+    // are derived from one set of frame-aligned boundaries.
+    workingTranscript = applyTrim(transcript, shaped);
+    segments = keepSegments(shaped);
     trimSummary = {
       cuts: trim.cuts.length,
       restored,
@@ -668,6 +787,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       width, height,
       fps: opts.fps,
       segments,
+      cutFadeSec: opts.cutFade,
       frames: frameSource,
       hasAudio: info.hasAudio,
       cropFocusX: opts.cropFocusX,

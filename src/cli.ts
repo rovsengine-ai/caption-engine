@@ -4,7 +4,12 @@ import { parseArgs, printHelp } from './cli/args.js';
 import { runDoctor, formatDoctor, isBlocking } from './cli/doctor.js';
 import { runPipeline, type Reporter } from './cli/run.js';
 import { languageTable } from './config/languages.js';
+import { loadEnv, redactSecrets } from './config/env.js';
 import { CaptionEngineError } from './errors.js';
+
+// Load .env before anything reads process.env. Real environment variables
+// always win — a stale file on disk must never beat the key you just exported.
+loadEnv();
 
 const isTty = process.stdout.isTTY === true;
 const c = {
@@ -132,19 +137,21 @@ async function main(): Promise<number> {
 main()
   .then((code) => process.exit(code))
   .catch((err: unknown) => {
+    // Defence in depth: an upstream provider can echo a rejected key back in an
+    // error body. Scrub anything matching a configured secret before printing.
     if (err instanceof CaptionEngineError) {
-      process.stderr.write(`\n${c.red('Error:')} ${err.message}\n`);
+      process.stderr.write(`\n${c.red('Error:')} ${redactSecrets(err.message)}\n`);
       if (err.hint) {
         process.stderr.write(`\n${c.yellow('How to fix:')}\n`);
-        for (const line of err.hint.split('\n')) process.stderr.write(`  ${line}\n`);
+        for (const line of redactSecrets(err.hint).split('\n')) process.stderr.write(`  ${line}\n`);
       }
       process.stderr.write('\n');
       process.exit(1);
     }
     const e = err as Error;
-    process.stderr.write(`\n${c.red('Unexpected error:')} ${e?.message ?? String(err)}\n`);
+    process.stderr.write(`\n${c.red('Unexpected error:')} ${redactSecrets(e?.message ?? String(err))}\n`);
     if (process.env.CAPTION_ENGINE_DEBUG && e?.stack) {
-      process.stderr.write(`\n${e.stack}\n`);
+      process.stderr.write(`\n${redactSecrets(e.stack)}\n`);
     } else {
       process.stderr.write(
         `\n${c.dim('Set CAPTION_ENGINE_DEBUG=1 for a stack trace.')}\n`,

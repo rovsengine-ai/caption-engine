@@ -17,7 +17,24 @@ export interface TrimOptions {
   cutAmbiguousFillersOnlyNearPause: boolean;
   /** How close a pause must be to corroborate an ambiguous filler. */
   ambiguousPauseWindowSec: number;
+  /**
+   * Only treat a repeated run of words as a false start when the speaker
+   * actually broke at the seam. Without this, deliberate repetition
+   * ("thank you thank you", "बहुत बहुत धन्यवाद") is cut as a retake.
+   */
+  falseStartRequiresPause: boolean;
+  /** Minimum gap at the seam between the two runs to count as a break. */
+  falseStartSeamPauseSec: number;
 }
+
+/**
+ * Default handle kept on each side of a speech cut.
+ *
+ * 40 ms is about one pitch period of a low male voice — enough to preserve a
+ * final consonant release without letting an audible fragment of the removed
+ * word survive.
+ */
+export const DEFAULT_CUT_HANDLE_SEC = 0.04;
 
 export const DEFAULT_TRIM_OPTIONS: TrimOptions = {
   maxSilenceSec: 0.7,
@@ -28,6 +45,8 @@ export const DEFAULT_TRIM_OPTIONS: TrimOptions = {
   lowConfidenceThreshold: 0.35,
   cutAmbiguousFillersOnlyNearPause: true,
   ambiguousPauseWindowSec: 0.35,
+  falseStartRequiresPause: true,
+  falseStartSeamPauseSec: 0.18,
 };
 
 /**
@@ -100,8 +119,21 @@ export function autoTrim(
       if (m.ambiguous && opts.cutAmbiguousFillersOnlyNearPause) {
         const prev = spoken[k - 1];
         const next = spoken[k + 1];
-        const gapBefore = prev ? w.start - prev.w.end : Infinity;
-        const gapAfter = next ? next.w.start - w.end : Infinity;
+
+        // A MISSING neighbour is not a pause, and neither is clip-boundary air.
+        //
+        // Treating it as Infinity made the guard trivially true for the first
+        // and last word of every transcript, so any ambiguous filler at either
+        // edge was cut unconditionally — "so um the point is" lost its "so".
+        //
+        // Leading and trailing dead air is an artefact of how the file was
+        // recorded and trimmed; it is present in almost every clip and says
+        // nothing about whether the speaker hesitated. Hesitation shows up as a
+        // pause *between* words. With no neighbour there is no evidence, so the
+        // gap counts as zero and the word survives.
+        const gapBefore = prev ? w.start - prev.w.end : 0;
+        const gapAfter = next ? next.w.start - w.end : 0;
+
         const nearPause =
           gapBefore >= opts.ambiguousPauseWindowSec || gapAfter >= opts.ambiguousPauseWindowSec;
         if (!nearPause) continue;
@@ -121,7 +153,7 @@ export function autoTrim(
 
   // ---- 3. False starts / repeated takes --------------------------------------
   if (opts.removeFalseStarts) {
-    cuts.push(...detectFalseStarts(spoken, nextId));
+    cuts.push(...detectFalseStarts(spoken, nextId, opts));
   }
 
   // ---- 4. Low confidence (opt-in) --------------------------------------------
@@ -175,10 +207,17 @@ function mkSilenceCut(id: string, start: number, end: number, wordIndices: numbe
  * Deliberately conservative: runs of 2-5 words, must match exactly after
  * normalisation, must be adjacent. Fuzzy matching here produces confident,
  * wrong cuts — the worst failure mode for this feature.
+ *
+ * A repeated run is NOT enough on its own. Deliberate repetition is fluent —
+ * "thank you thank you", "बहुत बहुत धन्यवाद" — and a genuine retake is not: the
+ * speaker breaks off, pauses, and restarts. So the seam between the two runs
+ * must contain a real gap (`falseStartSeamPauseSec`). Without that check this
+ * detector removes emphasis and calls it a correction.
  */
 function detectFalseStarts(
   spoken: Array<{ w: Word; i: number }>,
   nextId: (r: CutReason) => string,
+  opts: Pick<TrimOptions, 'falseStartRequiresPause' | 'falseStartSeamPauseSec'>,
 ): Cut[] {
   const cuts: Cut[] = [];
   const tokens = spoken.map(({ w }) => normaliseToken(w.text));
@@ -192,6 +231,14 @@ function detectFalseStarts(
       const b = tokens.slice(k + n, k + 2 * n);
       if (a.some((t) => !t)) continue;
       if (a.join(' ') !== b.join(' ')) continue;
+
+      // Require an audible break at the seam — see the note above.
+      if (opts.falseStartRequiresPause) {
+        const lastOfFirst = spoken[k + n - 1]!;
+        const firstOfSecond = spoken[k + n]!;
+        const seamGap = firstOfSecond.w.start - lastOfFirst.w.end;
+        if (seamGap < opts.falseStartSeamPauseSec) continue;
+      }
 
       // Mark the first occurrence for removal, keep the second.
       const startWord = spoken[k]!;
@@ -280,6 +327,95 @@ function shiftTime(t: number, cuts: Cut[]): number {
     else if (c.start < t && t < c.end) shift += t - c.start; // inside a cut
   }
   return Math.max(t - shift, 0);
+}
+
+/**
+ * Widen every kept segment by shrinking each cut inward by `handleSec`.
+ *
+ * ASR word boundaries are estimates. Cutting exactly at `word.end` routinely
+ * clips the release of the final consonant, which is the difference between a
+ * cut you don't notice and one that sounds chopped. A handle gives the audio
+ * room to breathe on both sides.
+ *
+ * This runs on the cut list **before** `applyTrim` and `keepSegments`, so the
+ * caption timeline and the rendered timeline are derived from the same numbers.
+ * Applying handles later — at render time only — would shift the audio without
+ * shifting the captions, and desynchronise everything.
+ *
+ * It only ever removes LESS than was proposed, so it cannot introduce a
+ * mid-word cut. Silence cuts already carry `paddingSec`; the handle is applied
+ * to speech cuts, where the boundary came from the ASR rather than from a
+ * measured gap.
+ */
+export function applyHandles(trim: TrimResult, handleSec: number): TrimResult {
+  if (handleSec <= 0) return trim;
+
+  const cuts: Cut[] = [];
+  for (const c of trim.cuts) {
+    if (c.reason === 'silence') {
+      cuts.push(c); // already padded by paddingSec against real silence
+      continue;
+    }
+    const start = c.start + handleSec;
+    const end = c.end - handleSec;
+    // A cut narrower than two handles is not worth making: what is left after
+    // shrinking is shorter than the artefact the handle exists to avoid.
+    if (end - start < 0.04) continue;
+    cuts.push({ ...c, start: round3(start), end: round3(end) });
+  }
+
+  const removed = cuts
+    .filter((c) => !c.restored)
+    .reduce((n, c) => n + (c.end - c.start), 0);
+
+  return {
+    ...trim,
+    cuts,
+    secondsRemoved: round3(removed),
+    trimmedDuration: round3(Math.max(trim.originalDuration - removed, 0)),
+  };
+}
+
+/**
+ * Snap cut boundaries to the video frame grid.
+ *
+ * `trim` selects whole frames; `atrim` slices audio to the sample. Cutting at
+ * an arbitrary float time therefore quantises the video segment but not the
+ * audio one, and times a caption to a moment the video never displays.
+ * Snapping makes all three agree: video, audio and caption times are derived
+ * from the same frame-aligned boundaries.
+ *
+ * What this does NOT fix, measured rather than assumed: rendered files show the
+ * video stream running ~70 ms longer than the audio stream. That delta is
+ * present with Auto Trim disabled entirely and stays constant from 1 to 8 cuts,
+ * so it is an encoder tail, not cut-induced drift. Cuts do not accumulate A/V
+ * error — `concat` re-times each segment and the streams stay locked.
+ *
+ * Direction is deliberate — start rounds UP, end rounds DOWN, so snapping only
+ * ever removes LESS than proposed and can never eat into a neighbouring word.
+ */
+export function snapCutsToFrames(trim: TrimResult, fps: number | undefined): TrimResult {
+  if (!fps || !Number.isFinite(fps) || fps <= 0) return trim;
+  const frame = 1 / fps;
+
+  const cuts: Cut[] = [];
+  for (const c of trim.cuts) {
+    const start = Math.ceil(c.start / frame) * frame;
+    const end = Math.floor(c.end / frame) * frame;
+    if (end - start < frame) continue; // less than one frame left: not worth cutting
+    cuts.push({ ...c, start: round3(start), end: round3(end) });
+  }
+
+  const removed = cuts
+    .filter((c) => !c.restored)
+    .reduce((n, c) => n + (c.end - c.start), 0);
+
+  return {
+    ...trim,
+    cuts,
+    secondsRemoved: round3(removed),
+    trimmedDuration: round3(Math.max(trim.originalDuration - removed, 0)),
+  };
 }
 
 /** Segments of the ORIGINAL timeline to keep — what FFmpeg needs to build the cut. */

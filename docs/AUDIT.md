@@ -176,7 +176,102 @@ this repo or this environment**, and item 13 (QuickTime) requires macOS. These c
 
 ---
 
-## 4. What I did *not* change
+## 4. Work completed after this audit (Phase 6A + hygiene)
 
-Nothing. No source file, config, README line or git object in `/Users/vaibhav/Documents/GitHub/caption-engine`
-was modified. The only new file is this audit.
+### Changed
+- `src/text/fonts.ts` — `FONT_DIR` now splits on `path.delimiter`; basenames split on both
+  separators; Windows font stores (`LOCALAPPDATA`, `SystemRoot`, `USERPROFILE`) scanned;
+  vendored-vs-system detection is separator- and case-tolerant.
+- `src/cli.ts` — loads `.env` at startup; all error output passes through a secret redactor.
+- `src/cli/run.ts` — fingerprints the input, stamps transcripts and cut lists, refuses stale reuse.
+- `src/cli/args.ts` — new `--allow-stale`.
+- `.env.example`, `.gitignore`, `README.md`, `package.json`.
+
+### Added
+- `src/config/env.ts` — zero-dep `.env` parser/loader (real env always wins), presence-only
+  secret reporting, `requireEnv`, `redactSecrets`.
+- `src/config/fingerprint.ts` — sha256 input fingerprints, stable config hashing, artifact
+  stamps, verification with distinct verdicts.
+- `scripts/caption-hinglish.mjs` + `npm run caption:hinglish`.
+- `test/windows-paths.test.ts`, `test/env.test.ts`, `test/fingerprint.test.ts` — **+68 tests**.
+
+### Verified
+490 → **558 tests, 556 pass, 0 fail, 2 skip**. `tsc` clean. `doctor` 24/25 (25/25 with a key set).
+Round-tripped a synthetic clip through render, Auto Trim review, all four output formats and
+audio-only input; every MP4 ffprobes as h264/yuv420p/aac with a correct duration.
+
+## 5. Production-readiness audit (second pass) and fixes
+
+A follow-up audit of the work above found three defects, all reproduced before being fixed.
+
+### Defect 1 — Auto Trim removed real words (severity: high)
+
+Real words sat in the `always` tier, cut with no pause, duration or confidence evidence:
+
+| Language | Token | Meaning | Before |
+|---|---|---|---|
+| hi | `हूँ` | "am" | `मैं बिल्कुल ठीक हूँ` → `मैं बिल्कुल ठीक` |
+| hi | `haan` | "yes" | `haan bilkul sahi hai` → `bilkul sahi hai` |
+| gu | `આ` | "this" | `આ ઘર બહુ સરસ છે` → `ઘર બહુ સરસ છે` |
+| te/kn/ml | `ఆ` `ಆ` `ആ` | "that" | demonstrative removed |
+| bn | `এ` | "this" | pronoun removed |
+| pa | `ਆ` | "come" | verb removed |
+
+English was unaffected — `a` was never in the list — which is why this survived.
+**Fix:** every real word demoted to `ambiguous`; the `always` tier now documents the rule
+that it may contain only non-words, enforced by a test.
+
+### Defect 2 — edge-of-transcript fillers cut unconditionally
+
+A missing neighbour produced `gapBefore/gapAfter = Infinity`, trivially satisfying the
+near-pause guard, so any ambiguous filler at the first or last word was always cut.
+**Fix:** a missing neighbour scores zero. Clip-boundary dead air is a recording artefact,
+not evidence of hesitation.
+
+### Defect 3 — intentional repetition treated as a retake
+
+Any exactly-repeated 2–5 word run was cut. **Fix:** `falseStartRequiresPause` (default on)
+requires a real break at the seam. Verified both ways: a 0.5 s break is cut, fluent
+`thank you thank you` and `बहुत बहुत धन्यवाद` are kept.
+
+### Smooth cuts added
+
+`--cut-handles` (default 40 ms), `--cut-fade` (default 12 ms), and frame snapping. Handles
+and snapping run on the cut list before captions are timed, so audio, video and text share
+one set of boundaries; both only ever remove *less* than proposed. Fades use `afade`, never
+`acrossfade`, so no duration changes.
+
+### A/V sync — measured, not assumed
+
+| Cuts | Video | Audio | Delta |
+|---|---|---|---|
+| 0 (no Auto Trim) | 6.000 s | 5.930 s | 0.070 s |
+| 1 | 1.600 s | 1.536 s | 0.064 s |
+| 4 | 4.267 s | 4.202 s | 0.065 s |
+| 8 | 7.800 s | 7.722 s | 0.078 s |
+
+The delta is present with cutting disabled and does not scale with cut count — an encoder
+tail, not drift. **Cuts do not accumulate A/V error.**
+
+### Also fixed
+- `.gitignore`: `frames/`, `.cache/`, `*.clips.json`, `*.analysis.json`, loose images.
+- `src/clips/llm.ts` no longer interpolates a raw provider body into an error; only the
+  structured `error.message` is used, with token-shaped strings stripped.
+
+### Still open after this pass
+No visual duplicate-shot detection. No runtime schema validator on model output (parsing is
+defensive but a malformed response silently yields `[]`). Clip scoring still swallows a
+failed chunk. Cuts still lack `confidence` and `sourceWords`. No WER/CER harness. Windows
+still unrun on Windows.
+
+**Tests: 605 (603 pass, 2 skip, 0 fail).**
+
+### Still untracked from the earlier commit
+The 20 debug/scratch files are now in `.gitignore`, but `.gitignore` does not affect files
+already tracked. To untrack them without deleting anything:
+
+```bash
+git rm -r --cached -q dbg*.mjs tl.mjs memcheck.mjs resvgtest.mjs scratch \
+  transcript.json cuts.json captions.srt current-data.json verify-sarvam.json \
+  verify-sarvam.srt .gitignore.save
+```

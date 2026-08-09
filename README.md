@@ -15,6 +15,18 @@ node dist/src/cli.js input.wav  --language en --format srt --output captions.srt
 node dist/src/cli.js render input.mp4 --transcript transcript.json --output out.mp4
 ```
 
+### One command for Hinglish reels
+
+```bash
+npm run caption:hinglish -- ./my-video.mp4      # macOS / Linux
+npm run caption:hinglish -- .\my-video.mp4      # Windows PowerShell
+```
+
+Builds, loads `.env`, transcribes with ElevenLabs in code-switching mode, romanises via
+Sarvam with English protected, runs Auto Trim, renders portrait with the bold style, and
+writes `outputs/my-video-hinglish.mp4`. Paths with spaces work — quote them.
+See [Windows and macOS setup](#windows-and-macos-setup).
+
 ## What it does
 
 - **Input**: MP4, MOV, MKV, WebM, AVI, M4V, MPG, WMV, FLV, TS · WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, CAF
@@ -166,6 +178,68 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt in
 npm install && npm run build && npm run doctor
 ```
 
+## Windows and macOS setup
+
+The same commands work on both. Nothing here is shell-specific: the workflow is a Node
+script that spawns processes with argument arrays, so there is no shell to mis-quote your
+filenames.
+
+### Windows (PowerShell) — one-time setup
+
+```powershell
+npm install
+npm run build
+npm run doctor
+Copy-Item .env.example .env
+notepad .env                 # paste ELEVENLABS_API_KEY and SARVAM_API_KEY
+```
+
+Then, for every video:
+
+```powershell
+npm run caption:hinglish -- .\my-video.mp4
+npm run caption:hinglish -- "C:\Users\me\Videos\My Video (final).mp4"
+```
+
+FFmpeg, if you do not already have it:
+
+```powershell
+winget install Gyan.FFmpeg   # then reopen the terminal so PATH updates
+```
+
+**You do not need to set `FONT_DIR` on Windows.** The Noto fonts in `assets/fonts/` are
+found automatically after `npm run build`. If you do set it, separate directories with
+`;` — the PATH separator for your platform, which the engine reads from Node rather than
+assuming:
+
+```powershell
+$env:FONT_DIR = "C:\fonts;D:\more-fonts"
+```
+
+### macOS / Linux — one-time setup
+
+```bash
+brew install node ffmpeg      # macOS; on Ubuntu: sudo apt install ffmpeg
+npm install
+npm run build
+npm run doctor
+cp .env.example .env
+$EDITOR .env
+```
+
+```bash
+npm run caption:hinglish -- ./my-video.mp4
+npm run caption:hinglish -- "./My Video (final).mp4"
+export FONT_DIR=/path/to/fonts:/another/path      # ":" here, ";" on Windows
+```
+
+### What the workflow checks before it spends anything
+
+It fails early, with the reason named, on: a missing input file, a missing `ffmpeg` or
+`ffprobe`, a failed build, a missing or blank `ELEVENLABS_API_KEY` or `SARVAM_API_KEY`, and
+an output that ffprobe cannot validate. **Error messages name the missing variable and
+never print its value.**
+
 ### Fonts
 
 The repo ships Noto fonts for every supported script. If `npm run doctor` reports missing
@@ -175,26 +249,29 @@ fonts:
 npm run fonts:install             # downloads static .ttf via @expo-google-fonts
 ```
 
-Or point at your own:
-
-```bash
-export FONT_DIR=/path/to/fonts:/another/path
-```
-
 Google Fonts' web CDN serves **woff2, which will not work** — FreeType and opentype.js
 need `.ttf` or `.otf`.
 
 ### API keys
 
+Put them in `.env` (copied from `.env.example`), or export them — a real environment
+variable always beats the file, so a stale `.env` cannot silently override the key you
+just exported.
+
 ```bash
-export ELEVENLABS_API_KEY="..."   # recommended: word timestamps + Indic code-switching
-export DEEPGRAM_API_KEY="..."     # backup; added Telugu + Kannada Jan 2026
-export SARVAM_API_KEY="..."       # benchmarking / India data residency only — see below
-export ANTHROPIC_API_KEY="..."    # only for --clips
-export ASR_PROVIDER=elevenlabs
+ELEVENLABS_API_KEY=...    # recommended: word timestamps + Indic code-switching
+SARVAM_API_KEY=...        # Hinglish transliteration; also benchmarking / data residency
+DEEPGRAM_API_KEY=...      # backup; added Telugu + Kannada Jan 2026
+ANTHROPIC_API_KEY=...     # only for --clips
+ASR_PROVIDER=elevenlabs
+OUTPUT_DIR=outputs
 ```
 
 No key is needed for `doctor`, `languages`, `--dry-run`, or `--transcript-in`.
+
+Keys are never written to logs, JSON output, error messages or rendered files. Error text
+is passed through a redactor before printing, so a provider that echoes a rejected key
+back in its error body cannot leak it into your terminal.
 
 ## Usage
 
@@ -387,6 +464,46 @@ Source words are never deleted — cuts mark `keep: false` and are fully reversi
 Restoring every cut reproduces the original duration exactly. Options:
 `--trim-silence <sec>` (default 0.7), `--keep-fillers` (silence only).
 
+#### What Auto Trim will not cut
+
+An audit found real words in the unconditional-cut tier. `हूँ` ("am"), `haan` ("yes"),
+`આ` ("this"), `ఆ`/`ಆ`/`ആ` ("that"), `এ` ("this") and `ਆ` ("come") were being removed with
+no supporting evidence, so `मैं ठीक हूँ` became `मैं ठीक`. The English list was correct —
+`a` was never in it — which is exactly why it survived: the language everyone tests in was
+fine.
+
+The rule now: **a token may only be cut on sight if it is not a word.** "um", "hmm" and
+"erm" qualify. Everything else is `ambiguous` and needs a real pause beside it. Two
+related fixes:
+
+- A **missing neighbour is no longer treated as an infinite pause**, so an ambiguous filler
+  at the first or last word is no longer cut automatically. Leading and trailing dead air
+  is a recording artefact, not evidence of hesitation.
+- A repeated run is only a false start when the speaker **broke at the seam**
+  (`falseStartRequiresPause`). "thank you thank you" and `बहुत बहुत धन्यवाद` are emphasis,
+  and are kept; "I think that— *pause* —I think that we should" is a retake, and is cut.
+
+#### Smooth cuts
+
+```bash
+--cut-handles <sec>   # audio kept either side of a speech cut  (default 0.04)
+--cut-fade <sec>      # fade at each join                       (default 0.012)
+```
+
+- **Handles** are applied to the cut list *before* captions are timed, so audio and text
+  come from the same boundaries. They only ever remove less than proposed, so they cannot
+  introduce a mid-word cut.
+- **Frame snapping** aligns every boundary to the video frame grid (start up, end down), so
+  the video trim, the audio trim and the caption times agree.
+- **Fades** are a level shape, not a timing change — `afade`, never `acrossfade`, because
+  crossfading would shorten the total and desynchronise every caption. The clip does not
+  fade up at its own start or down at its own end.
+
+Measured, not assumed: rendered MP4s show the video stream running ~70 ms longer than the
+audio stream. That is present with Auto Trim **disabled** and stays constant from 1 to 8
+cuts, so it is an encoder tail rather than cut-induced drift. Cuts do not accumulate A/V
+error.
+
 ### Reuse a transcript across renders (never pay for ASR twice)
 
 ASR is the only part that costs money. Pay once, then use the `render` subcommand, which
@@ -405,6 +522,43 @@ node dist/src/cli.js render v.mp4 --transcript t.json --format srt              
 
 `--transcript-in` on the normal command does the same thing; `render` just makes the
 guarantee explicit and enforceable.
+
+#### Replacing a video keeps the same filename — and that used to be dangerous
+
+Re-export a clip from your editor, keep the name, reuse yesterday's `transcript.json`, and
+you get captions from the previous take with every timestamp subtly wrong. Nothing warns
+you, because the filename matched.
+
+So every transcript and cut list written by this tool carries an `_engine` block recording
+the **sha256, byte size and duration** of the media it came from, plus a hash of the
+options that shaped it:
+
+```json
+"_engine": {
+  "kind": "transcript",
+  "input": { "sha256": "03ae425c…", "sizeBytes": 98342, "durationSec": 6, "name": "take.mp4" },
+  "configHash": "7bf9d58992d626ef"
+}
+```
+
+Reusing it against different bytes is refused:
+
+```
+Error: Refusing to reuse a transcript that does not match this input.
+  Reason: content hash differs (cached 03ae425c8ddd…, current 8dc76edb46d4…)
+```
+
+The config hash covers only what changes the *transcript* — provider, language,
+code-switching, keyterms. Style, aspect and output path deliberately do not invalidate
+something you paid for.
+
+- Files written by earlier versions carry no stamp. They still load, with a warning.
+- `--allow-stale` overrides the refusal when you know better.
+- `CAPTION_ENGINE_FAST_HASH=1` hashes size plus head/middle/tail instead of every byte —
+  much faster on very large files, no longer a true content hash.
+
+Cut files are now written as `{ "_engine": …, "cuts": [ … ] }`. The old bare-array form
+still loads unchanged.
 
 ### Long-form → clips
 
@@ -476,7 +630,7 @@ will be materially worse. Measure it on your own clips.
 ## Development
 
 ```bash
-npm test                    # 437 tests
+npm test                    # 605 tests
 npm run evaluate            # measured Hinglish + Auto Trim report
 npm run test:render         # real FFmpeg renders + pixel assertions
 npm run test:raster         # rasterisation: functional probes, transparency, all scripts
@@ -489,6 +643,9 @@ npm run doctor
 src/
   types.ts            core vendor-neutral transcript schema
   errors.ts           typed errors, each with an actionable hint
+  config/
+    env.ts            .env loading + presence-only secret reporting
+    fingerprint.ts    input/config hashing, artifact stamps, stale-reuse refusal
   asr/                ElevenLabs, Deepgram, Sarvam adapters
   text/               script detection, font registry, HarfBuzz shaper
   captions/           cue grouping, SVG renderer, ASS/SRT export, styles
@@ -504,8 +661,10 @@ src/
 ## Known limitations
 
 - **Filler lexicons are not native-speaker reviewed** (except English). They will miss
-  regional fillers and may flag words that are not fillers. Budget one day per language —
-  see [docs/NATIVE_REVIEW.md](docs/NATIVE_REVIEW.md).
+  regional fillers and may flag words that are not fillers. The unconditional-cut tier has
+  been audited and now contains only non-words, but the `ambiguous` lists still need a
+  speaker's eye. Budget one day per language — see
+  [docs/NATIVE_REVIEW.md](docs/NATIVE_REVIEW.md).
 - **Romanisation vowel-length rules are hand-tuned and unreviewed.** The engine is real
   (schwa deletion, conjuncts, nukta, anusvara assimilation) and every rule has a
   regression test, but "is this how a Hindi speaker would type it?" needs a native
