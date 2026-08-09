@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ProsodyAnalysis } from './prosody.js';
 
-const CACHE_VERSION = 1;
+/**
+ * Bumped alongside ProsodyAnalysis.version. An entry written under an older
+ * schema is discarded rather than reinterpreted: a cached measurement whose
+ * fields mean something subtly different is worse than no cache at all.
+ */
+const CACHE_VERSION = 2;
 
 /** Local-only cache. It stores numeric measurements, never audio or credentials. */
 export function prosodyCachePath(inputHash: string, root = join(tmpdir(), 'caption-engine-prosody-cache')): string {
@@ -15,7 +20,9 @@ export function loadProsodyCache(inputHash: string, root?: string): ProsodyAnaly
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as { version?: number; analysis?: ProsodyAnalysis };
-    return parsed.version === CACHE_VERSION && parsed.analysis?.version === 1 ? parsed.analysis : null;
+    return parsed.version === CACHE_VERSION && parsed.analysis?.version === CACHE_VERSION
+      ? parsed.analysis
+      : null;
   } catch {
     return null;
   }

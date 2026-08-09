@@ -416,3 +416,29 @@ export function clearFontCache(): void {
   fileCache = null;
   resolveCache.clear();
 }
+
+/**
+ * The discovered families, as a table for `caption-engine fonts`.
+ *
+ * Exists so `--font` is discoverable without reading the source or triggering
+ * an error to find out what the valid values are.
+ */
+export function fontTable(): string {
+  const families = discoverFontFamilies();
+  if (families.length === 0) {
+    return 'No fonts found.\nRun "npm run fonts:install", or set FONT_DIR to a directory of .ttf/.otf files.';
+  }
+  const width = Math.max(12, ...families.map((f) => f.name.length));
+  const rows = families.map((f) => {
+    const weights = [f.regular ? 'regular' : null, f.bold ? 'bold' : null].filter(Boolean).join('+');
+    return `  ${f.name.padEnd(width)}  ${weights.padEnd(14)}${f.source.padEnd(11)}${f.scripts.join(', ')}`;
+  });
+  return [
+    `${families.length} font famil${families.length === 1 ? 'y' : 'ies'} available for --font`,
+    '',
+    `  ${'family'.padEnd(width)}  ${'weights'.padEnd(14)}${'source'.padEnd(11)}scripts`,
+    ...rows,
+    '',
+    'Add more by placing .ttf/.otf files in assets/fonts, or set FONT_DIR.',
+  ].join('\n');
+}

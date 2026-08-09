@@ -835,6 +835,167 @@ node dist/src/cli.js podcast.mp4 --clips --format json -o podcast.json
 --max-words 4            --crop-focus 0.5
 ```
 
+### Fonts
+
+Fonts are **discovered, not hard-coded**. Drop a `.ttf` or `.otf` into
+`assets/fonts/` (or any directory in `FONT_DIR`) and it becomes selectable with no code
+change. Regular and bold faces of the same family are grouped automatically, so
+`--active-bold` uses a **real bold face** — weight is never faked with an SVG stroke.
+
+```bash
+node dist/src/cli.js fonts                       # list discovered families
+node dist/src/cli.js in.mp4 --font "Noto Sans Kannada"
+FONT_DIR=/my/fonts node dist/src/cli.js in.mp4 --font "My Brand Sans"
+```
+
+An unknown `--font` is an **error listing every available family** — never a silent
+substitution, because a silent substitution is how you ship a caption full of empty boxes.
+Glyph fallback is separate and applies only to characters the selected font genuinely
+lacks: the shaper detects `.notdef` on a shaped run and retries with a font that covers
+the script.
+
+### Active-word highlighting
+
+```bash
+node dist/src/cli.js in.mp4 \
+  --highlight active-word --active-scale 1.12 --active-color '#FFD400' --active-bold
+```
+
+Timing comes from **real ASR word timestamps**, never from dividing a line's duration by
+its word count. A word becomes active at its own `start` and stays active until the *next*
+word starts, which removes the flicker that appears in ASR gaps without shifting a single
+timestamp. Overlapping provider timings are clamped, never re-ordered.
+
+**Lines do not jump.** Every word reserves the widest state it can ever occupy — resting,
+toned, bold, and scaled — so the layout of a cue is identical for every frame of that cue,
+regardless of which word is currently highlighted. Without that, `--active-bold` would
+shove the whole line sideways each time the highlight advanced.
+
+### Local audio prosody (`--prosody` / `--tone-style auto`)
+
+Opt-in styling driven by how a word was **spoken**, measured locally.
+
+```bash
+node dist/src/cli.js render in.mp4 --transcript t.json --tone-style auto --diagnostics
+node dist/src/cli.js render in.mp4 --transcript t.json --prosody --tone-scope word
+node dist/src/cli.js in.mp4 --tone-style none        # explicit off (the default)
+```
+
+**One tone per caption line, by default.** Classified per word, tone changes about five
+times a second on real speech — measured on a real clip the sequence ran
+`excited, neutral, emphatic, neutral, soft, soft, fast…`. Restyling every ~200 ms reads as
+twitching, not expression. So the **line carries the mood and the active word carries the
+beat**: `--tone-scope cue` (default) gives a line one confidence-weighted majority tone,
+and a line whose words disagree keeps the base style entirely. `--tone-scope word` restores
+per-word tone if you want maximum responsiveness and can live with the flicker.
+
+**How it works.** FFmpeg decodes the audio to 16 kHz mono PCM; everything after that is
+our own TypeScript. Per word we measure loudness (RMS/peak dB relative to the speaker's own
+median), speaking rate, pauses, voiced ratio, and **F0 — the fundamental frequency —
+using a YIN pitch detector** (`src/media/pitch.ts`): difference function, cumulative mean
+normalisation, absolute-threshold pick, and parabolic interpolation for sub-sample
+resolution. Pitch is reported relative to the speaker's own median in **semitones**,
+because Hz is not perceptually linear and comparing speakers in Hz makes every
+low-voiced person look monotone.
+
+A conservative classifier turns those into one of `neutral · calm · excited · emphatic ·
+fast · soft`, with a confidence, and `config/caption-theme.json` maps tones to styles.
+Results are cached locally per input, so re-rendering does not re-analyse.
+
+**No network, no key, no upload.** FFmpeg is used purely as a decoder.
+
+**Honest limits — read these.**
+
+- This is **not emotion recognition.** "Excited" means *louder and higher-pitched than this
+  speaker usually is*. That correlates with excitement, and also with a passing truck, a
+  laugh, and a badly placed microphone.
+- F0 is undefined for unvoiced sounds (`s`, `f`, `sh`, stops). Words with no usable reading
+  show `—` in diagnostics. **Absent is not "low pitch."**
+- Music, overlapping speakers and heavy noise produce confident-looking garbage. Every
+  frame carries a clarity score and low-clarity frames are discarded rather than trusted.
+- Below `minConfidence` a word keeps the base style. The default theme is deliberately
+  restrained: if a viewer can tell which rule fired, the rule is too loud.
+- Nothing changes without `--prosody`. With the flag absent, output is byte-identical to a
+  build without this feature.
+
+### Configuring `config/caption-theme.json`
+
+```json
+{
+  "version": 1,
+  "minConfidence": 0.6,
+  "tones": {
+    "excited":  { "bold": true, "scale": 1.08, "color": "#FFD166" },
+    "emphatic": { "bold": true, "scale": 1.05 },
+    "soft":     { "scale": 0.98, "color": "#B8C4D0" },
+    "fast":     { "scale": 0.97 },
+    "calm":     { "color": "#DCE6F0" },
+    "neutral":  {}
+  }
+}
+```
+
+Every field is optional; anything omitted inherits the base caption style. `fontFamily`
+must name a discovered family. `scale` is bounded to 0.5–2 and is **validated at load
+time**, because tone scale and `--active-scale` multiply and an unbounded value would
+overflow the width the layout reserved. Point elsewhere with `--caption-theme <file>`.
+
+The same file also configures the active word and the classifier itself:
+
+```json
+{
+  "active":     { "color": "#FFD54A", "scale": 1.08 },
+  "thresholds": { "excitedPitch": 2, "excitedEnergy": 0.6, "fastRate": 3.2 }
+}
+```
+
+CLI flags beat `active`. `thresholds` merge over the built-in defaults, so you can retune
+one rule without restating the other nine. Units are **semitones relative to the speaker's
+own median pitch** and energy in units of the clip's own spread — never absolute Hz or dB,
+which mean nothing across different recordings.
+
+> **Fonts you must add yourself.** Tone-driven *font* switching is implemented and works,
+> but only fonts present in `assets/fonts/` are selectable, and the repo vendors the Noto
+> family only. The shipped theme therefore varies weight, scale and colour. Drop
+> `Inter-*.ttf`, `Poppins-*.ttf`, `Anton-Regular.ttf` etc. into `assets/fonts/`, confirm
+> with `caption-engine fonts`, then set `"fontFamily"` per tone.
+
+Resolution order is `base style → tone → active-word state`. The active state wins: tone
+describes how a word was spoken and is fixed for the cue, while the highlight changes
+frame to frame, so the transient signal must stay visible.
+
+### Diagnostics
+
+`--diagnostics` prints the transliteration table and, with `--prosody`, a per-word table of
+measurements and the style they resolved to:
+
+```
+   idx  word                 start     end   rms dB   F0 Hz   rate  tone      conf  font                 style
+     0  ಇದು                   1.25    1.60    -18.2     172   2.80  emphatic  0.72  Noto Sans Kannada    bold 1.05x #FFFFFF [tone]
+     1  ಒಂದು                  1.62    1.90    -24.6       —   2.80  neutral   0.51  Noto Sans Kannada    bold 1.00x #FFFFFF
+```
+
+Measurements and style decisions only — no paths beyond the font family, no environment,
+no credentials. Safe to paste into a bug report.
+
+### Testing without spending anything
+
+None of these contact a paid API:
+
+```bash
+npm run build      # tsc
+npm test           # full suite; every fetch is stubbed
+npm run doctor     # functional probes only — checks key PRESENCE, never calls
+npx tsc --noEmit   # typecheck (there is no separate lint script)
+```
+
+For end-to-end work use a saved transcript. The `render` subcommand sets an internal
+`noAsr` flag, so it **structurally cannot** reach an ASR provider:
+
+```bash
+node dist/src/cli.js render in.mp4 --transcript t.json --prosody --diagnostics -o out.mp4
+```
+
 ## Supported languages
 
 `node dist/src/cli.js languages` prints the live table.

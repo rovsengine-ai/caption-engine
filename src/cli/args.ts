@@ -75,6 +75,12 @@ export interface CliOptions {
   prosody: boolean;
   /** Override config/caption-theme.json. */
   captionTheme?: string;
+  /**
+   * Whether a tone styles a whole caption line or each word individually.
+   * 'cue' by default: per-word tone changes roughly every 200 ms on real
+   * speech, which reads as flicker rather than expression.
+   */
+  toneScope: 'cue' | 'word';
   /** Propose Auto Trim cuts and stop before rendering. */
   reviewCuts: boolean;
   transcriptOut?: string;
@@ -98,6 +104,7 @@ USAGE
                                    render from a saved transcript — NEVER calls an ASR API
   caption-engine doctor            check every rendering dependency (functional probes)
   caption-engine languages         list supported languages
+  caption-engine fonts             list discovered font families for --font
 
 INPUT
   Video: .mp4 .mov .mkv .webm .avi .m4v .mpg .wmv .flv .ts
@@ -146,6 +153,11 @@ APPEARANCE
       --prosody             Measure local audio prosody (loudness + F0 pitch,
                             all offline) and style each word by its tone.
                             Off by default; without it output is unchanged.
+      --tone-style <mode>   auto | none   (default: none) — alias for --prosody
+      --tone-scope <mode>   cue | word    (default: cue)
+                            cue  one tone per caption line. Steadier: per-word
+                                 tone changes ~5x/second on real speech.
+                            word a tone per word. More responsive, twitchier.
       --caption-theme <f>   Tone→style map. Default: config/caption-theme.json
       --hinglish-glossary <f>
                             Extra glossary merged over the built-in one. Maps
@@ -306,12 +318,14 @@ export type ParsedCommand =
   | { command: 'help' }
   | { command: 'doctor' }
   | { command: 'languages' }
+  | { command: 'fonts' }
   | { command: 'run'; options: CliOptions };
 
 export function parseArgs(argv: string[]): ParsedCommand {
   if (argv.length === 0) return { command: 'help' };
   if (argv[0] === 'doctor') return { command: 'doctor' };
   if (argv[0] === 'languages' || argv[0] === '--list-languages') return { command: 'languages' };
+  if (argv[0] === 'fonts' || argv[0] === '--list-fonts') return { command: 'fonts' };
   if (argv.includes('-h') || argv.includes('--help')) return { command: 'help' };
 
   // `render` is a thin alias that GUARANTEES no ASR call: it requires a
@@ -358,6 +372,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
     // getting native back must be something you opted into.
     romanFallback: 'error',
     prosody: false,
+    toneScope: 'cue',
     allowStale: false,
     dryRun: false,
     verbose: false,
@@ -447,6 +462,34 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--no-protect-english': o.protectEnglish = false; break;
       case '--diagnostics': o.showDiagnostics = true; break;
       case '--prosody': o.prosody = true; break;
+      case '--tone-style': {
+        // Alias for --prosody, phrased in terms of what it DOES rather than
+        // what it measures. 'none' is the explicit off switch.
+        const v = (next ?? '').toLowerCase();
+        if (v !== 'auto' && v !== 'none') {
+          throw new CaptionEngineError(
+            `--tone-style must be auto or none (got "${next ?? ''}").`,
+            'auto  analyse local audio prosody and style words by tone\n' +
+              'none  disable tone styling (the default)',
+          );
+        }
+        o.prosody = v === 'auto';
+        i++;
+        break;
+      }
+      case '--tone-scope': {
+        const v = (next ?? '').toLowerCase();
+        if (v !== 'cue' && v !== 'word') {
+          throw new CaptionEngineError(
+            `--tone-scope must be cue or word (got "${next ?? ''}").`,
+            'cue   one tone per caption line (default, steadier on screen)\n' +
+              'word  a tone per word (more responsive, visibly twitchier)',
+          );
+        }
+        o.toneScope = v;
+        i++;
+        break;
+      }
       case '--caption-theme': o.captionTheme = needValue(a, next); i++; break;
       case '--code-switching': case '--code-switch': o.codeSwitching = true; break;
       case '--keyterms':

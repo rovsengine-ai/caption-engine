@@ -2,6 +2,7 @@
 import { rmSync, existsSync } from 'node:fs';
 import { parseArgs, printHelp } from './cli/args.js';
 import { runDoctor, formatDoctor, isBlocking } from './cli/doctor.js';
+import { fontTable } from './text/fonts.js';
 import { runPipeline, type Reporter } from './cli/run.js';
 import { languageTable } from './config/languages.js';
 import { loadEnv, redactSecrets } from './config/env.js';
@@ -98,6 +99,10 @@ async function main(): Promise<number> {
   }
   if (parsed.command === 'languages') {
     process.stdout.write(languageTable() + '\n');
+    return 0;
+  }
+  if (parsed.command === 'fonts') {
+    process.stdout.write(fontTable() + '\n');
     return 0;
   }
   if (parsed.command === 'doctor') {

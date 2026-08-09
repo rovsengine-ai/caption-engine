@@ -92,9 +92,16 @@ export function yinF0(
   const minLag = Math.max(2, Math.floor(sampleRate / maxHz));
   if (maxLag <= minLag) return { f0Hz: null, clarity: 0 };
 
-  // Step 1: difference function.
+  // Step 1: difference function, from lag 1 — NOT from minLag.
+  //
+  // The normalisation below divides by the running MEAN of d(1..τ). Starting
+  // that sum at minLag instead of 1 leaves it too small for the first lags
+  // considered, which inflates d'(τ) there and biases the chosen lag low. The
+  // symptom is subtle and frequency-dependent: sub-1% error at 100 Hz growing
+  // to ~2% at 330 Hz, because the search window starts proportionally closer to
+  // the true period as F0 rises. Caught by the accuracy test in test/pitch.test.ts.
   const diff = new Float32Array(maxLag + 1);
-  for (let lag = minLag; lag <= maxLag; lag++) {
+  for (let lag = 1; lag <= maxLag; lag++) {
     let sum = 0;
     const n = samples.length - lag;
     for (let j = 0; j < n; j++) {
@@ -104,14 +111,15 @@ export function yinF0(
     diff[lag] = sum;
   }
 
-  // Step 2: cumulative mean normalised difference. Without this, d(τ) falls
-  // monotonically and the minimum is always at τ=0 — useless.
+  // Step 2: cumulative mean normalised difference,
+  //   d'(τ) = d(τ) / [ (1/τ) · Σ_{j=1..τ} d(j) ]
+  // Without this, d(τ) falls monotonically and the minimum is always at τ=0.
   const cmnd = new Float32Array(maxLag + 1);
   cmnd[0] = 1;
   let runningSum = 0;
-  for (let lag = minLag; lag <= maxLag; lag++) {
+  for (let lag = 1; lag <= maxLag; lag++) {
     runningSum += diff[lag]!;
-    cmnd[lag] = runningSum > 0 ? (diff[lag]! * (lag - minLag + 1)) / runningSum : 1;
+    cmnd[lag] = runningSum > 0 ? (diff[lag]! * lag) / runningSum : 1;
   }
 
   // Step 3: first dip below the threshold, walking to the bottom of that dip.
@@ -154,10 +162,17 @@ function parabolicMinimum(v: Float32Array, lag: number, lo: number, hi: number):
   const a = v[lag - 1]!;
   const b = v[lag]!;
   const c = v[lag + 1]!;
-  const denom = 2 * (2 * b - a - c);
+  // Vertex of the parabola through (lag-1, a), (lag, b), (lag+1, c):
+  //   shift = ½·(a - c) / (a - 2b + c)
+  // The denominator is the second difference and is POSITIVE at a minimum.
+  // Writing it as 2·(2b - a - c) instead flips the sign and reflects the
+  // correction about the integer lag — which moved every estimate to the wrong
+  // side of the true period by up to a full sample (260 Hz read as 256 Hz,
+  // 330 Hz as 337 Hz). The accuracy cases in test/pitch.test.ts pin this down.
+  const denom = a - 2 * b + c;
   if (denom === 0) return lag;
-  const shift = (a - c) / denom;
-  // A well-formed parabola cannot move the minimum more than half a sample.
+  const shift = (0.5 * (a - c)) / denom;
+  // A well-formed minimum cannot sit more than one sample from the integer one.
   return Math.abs(shift) <= 1 ? lag + shift : lag;
 }
 

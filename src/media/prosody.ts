@@ -1,5 +1,6 @@
 import type { Transcript, Word } from '../types.js';
 import { AudioAnalysis, type AudioAnalysisSnapshot } from './audio-analysis.js';
+import { DEFAULT_THRESHOLDS, type ClassifierThresholds } from '../captions/tone-style.js';
 
 /** Deterministic audio/prosody labels — deliberately not emotion recognition. */
 export type Tone = 'neutral' | 'calm' | 'excited' | 'emphatic' | 'fast' | 'soft';
@@ -29,6 +30,15 @@ export interface ProsodyFeatures {
 }
 
 export interface ProsodyWord {
+  /**
+   * Index into `Transcript.words` — the ORIGINAL array, not the filtered list
+   * of spoken words this module iterates.
+   *
+   * This distinction bit once already: emitting the filtered position meant a
+   * consumer doing `transcript.words[p.index]` landed on a different word (a
+   * `spacing` entry, usually) on any transcript that carries non-word tokens.
+   * It showed up as blank words in the --diagnostics table.
+   */
   index: number;
   start: number;
   end: number;
@@ -38,7 +48,13 @@ export interface ProsodyWord {
 }
 
 export interface ProsodyAnalysis {
-  version: 1;
+  /**
+   * Schema version. BUMP THIS whenever the meaning of a field changes, not just
+   * when a field is added — the local cache keys on it, and a stale entry with
+   * the old meaning is indistinguishable from a fresh one. Version 2 changed
+   * `ProsodyWord.index` from a filtered position to a transcript position.
+   */
+  version: 2;
   available: boolean;
   reason?: string;
   words: ProsodyWord[];
@@ -85,7 +101,11 @@ function rateAround(words: Word[], index: number, radiusSec = 1.25): number {
  * needs two agreeing signals should win over one that needs a single signal,
  * because it is less likely to be an artefact.
  */
-export function classifyProsody(features: ProsodyFeatures): { tone: Tone; confidence: number } {
+export function classifyProsody(
+  features: ProsodyFeatures,
+  thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
+): { tone: Tone; confidence: number } {
+  const T = thresholds;
   const hasPitch = features.f0Hz !== undefined && features.f0Hz > 0;
   const pitchRel = features.pitchRelative ?? 0;
   const pitchVar = features.pitchVariation ?? 0;
@@ -117,25 +137,28 @@ export function classifyProsody(features: ProsodyFeatures): { tone: Tone; confid
   }
 
   // Two-signal rules: energy and pitch agreeing.
-  if (hasPitch && pitchRel >= 2 && features.energyRelative >= 0.6) {
+  if (hasPitch && pitchRel >= T.excitedPitch && features.energyRelative >= T.excitedEnergy) {
     return { tone: 'excited', confidence };
   }
-  if (hasPitch && pitchRel <= -1.5 && features.energyRelative <= -0.4) {
+  if (hasPitch && pitchRel <= T.softPitch && features.energyRelative <= T.softEnergy) {
     return { tone: 'soft', confidence };
   }
-  if (hasPitch && Math.abs(pitchRel) < 1 && pitchVar < 1.5 && features.speakingRate <= 2.2) {
+  if (
+    hasPitch && Math.abs(pitchRel) < T.calmPitch &&
+    pitchVar < T.calmPitchSpread && features.speakingRate <= T.calmRate
+  ) {
     return { tone: 'calm', confidence };
   }
 
   // Single-signal rules, unchanged in spirit from the energy-only classifier.
-  if (features.speakingRate >= 3.2 && features.energyRelative > 0.25) {
+  if (features.speakingRate >= T.fastRate && features.energyRelative > T.fastEnergy) {
     return { tone: 'fast', confidence };
   }
   if (features.energyRelative >= 1.1 && features.energyVariationDb >= 3) {
     return { tone: 'excited', confidence };
   }
   if (
-    features.energyRelative >= 0.65 ||
+    features.energyRelative >= T.emphaticEnergy ||
     (features.pauseBefore >= 0.25 && features.energyRelative >= 0.3)
   ) {
     return { tone: 'emphatic', confidence };
@@ -148,10 +171,19 @@ export function classifyProsody(features: ProsodyFeatures): { tone: Tone; confid
 }
 
 /** Analyze an already-local audio measurement once, normalized to this clip. */
-export function analyzeProsody(transcript: Transcript, audio: AudioAnalysis): ProsodyAnalysis {
-  const words = transcript.words.filter((word) => word.type === 'word' && word.keep !== false);
+export function analyzeProsody(
+  transcript: Transcript,
+  audio: AudioAnalysis,
+  thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
+): ProsodyAnalysis {
+  // Keep the original position alongside each spoken word, so the result can be
+  // indexed back into the transcript the caller actually holds.
+  const spoken = transcript.words
+    .map((word, originalIndex) => ({ word, originalIndex }))
+    .filter(({ word }) => word.type === 'word' && word.keep !== false);
+  const words = spoken.map((s) => s.word);
   if (!audio.available) {
-    return { version: 1, available: false, reason: audio.unavailableReason, words: [], audio: audio.snapshot() };
+    return { version: 2, available: false, reason: audio.unavailableReason, words: [], audio: audio.snapshot() };
   }
   const levels = words.map((word) => audio.energyDb(word.start, word.end)).filter((db) => db > -90);
   const baseline = median(levels);
@@ -178,10 +210,16 @@ export function analyzeProsody(transcript: Transcript, audio: AudioAnalysis): Pr
           }
         : {}),
     };
-    const classified = classifyProsody(item);
-    return { index, start: word.start, end: word.end, features: item, ...classified };
+    const classified = classifyProsody(item, thresholds);
+    return {
+      index: spoken[index]!.originalIndex,
+      start: word.start,
+      end: word.end,
+      features: item,
+      ...classified,
+    };
   });
-  return { version: 1, available: true, words: features, audio: audio.snapshot() };
+  return { version: 2, available: true, words: features, audio: audio.snapshot() };
 }
 
 export function audioFromProsody(analysis: ProsodyAnalysis): AudioAnalysis {

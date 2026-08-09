@@ -18,7 +18,7 @@ import { analyzeAudio, type AudioAnalysis } from '../media/audio-analysis.js';
 import { analyzeProsody, type ProsodyAnalysis } from '../media/prosody.js';
 import { loadProsodyCache, saveProsodyCache } from '../media/prosody-cache.js';
 import {
-  loadCaptionTheme, toneStyleFor, formatProsodyDiagnostics, NEUTRAL_THEME,
+  loadCaptionTheme, toneStyleFor, dominantTone, formatProsodyDiagnostics, NEUTRAL_THEME,
   type ToneStyle, type ProsodyDiagnosticRow,
 } from '../captions/tone-style.js';
 import { resolveWordStyle } from '../captions/active.js';
@@ -913,7 +913,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       // Pitch needs a fourth FFmpeg pass over the audio, hence its own call
       // rather than reusing Auto Trim's analysis.
       const withPitch = await analyzeAudio(inputPath, info.durationSec, { pitch: true });
-      prosody = analyzeProsody(transcript, withPitch);
+      prosody = analyzeProsody(transcript, withPitch, theme.thresholds);
       if (prosody.available) saveProsodyCache(cacheKey, prosody);
     }
 
@@ -936,22 +936,70 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         'tones: ' + [...counts.entries()].map(([t, n]) => `${t} ${n}`).join(', '),
       );
 
-      // Map prosody (indexed over kept words) onto cue-local word indices.
+      // Map prosody onto cue-local word indices, keyed by TIME rather than by
+      // array position: Auto Trim may have removed words between analysis and
+      // cue grouping, and a positional join would then be silently off by one.
       toneStylesByCue = new Map();
       const byTime = new Map<string, (typeof prosody.words)[number]>();
       for (const w of prosody.words) byTime.set(`${w.start}:${w.end}`, w);
+
       let styled = 0;
+      const cueTones = new Map<number, ReturnType<typeof dominantTone>>();
+      // What was ACTUALLY applied, keyed by transcript word index. Diagnostics
+      // read from this rather than recomputing, so the table can never disagree
+      // with the render — a diagnostics table that lies is worse than none.
+      const applied = new Map<number, { tone: string; confidence: number; style?: ToneStyle }>();
+
       for (const cue of cues) {
+        const matched = cue.words
+          .map((word) => byTime.get(`${word.start}:${word.end}`))
+          .filter((p): p is NonNullable<typeof p> => p !== undefined);
+        if (matched.length === 0) continue;
+
         const forCue = new Map<number, ToneStyle>();
-        cue.words.forEach((word, i) => {
-          const p = byTime.get(`${word.start}:${word.end}`);
-          if (!p) return;
-          const style = toneStyleFor(theme, p.tone, p.confidence);
-          if (style) { forCue.set(i, style); styled++; }
-        });
+
+        if (opts.toneScope === 'cue') {
+          // One tone for the whole line. The line carries the mood; the active
+          // word carries the beat. Giving both jobs to the same per-word signal
+          // is what made the styling flicker.
+          const cueTone = dominantTone(matched, { minConfidence: theme.minConfidence });
+          cueTones.set(cue.index, cueTone);
+          const style = cueTone ? toneStyleFor(theme, cueTone.tone, cueTone.share) : undefined;
+          if (style) {
+            cue.words.forEach((_, i) => forCue.set(i, style));
+            styled += cue.words.length;
+          }
+          for (const p of matched) {
+            applied.set(p.index, {
+              tone: cueTone?.tone ?? 'neutral',
+              confidence: cueTone?.share ?? 0,
+              ...(style ? { style } : {}),
+            });
+          }
+        } else {
+          cue.words.forEach((word, i) => {
+            const p = byTime.get(`${word.start}:${word.end}`);
+            if (!p) return;
+            const style = toneStyleFor(theme, p.tone, p.confidence);
+            if (style) { forCue.set(i, style); styled++; }
+            applied.set(p.index, {
+              tone: p.tone, confidence: p.confidence, ...(style ? { style } : {}),
+            });
+          });
+        }
+
         if (forCue.size > 0) toneStylesByCue.set(cue.index, forCue);
       }
-      log.info(`${styled} word(s) styled by tone (the rest keep the base style)`);
+
+      if (opts.toneScope === 'cue') {
+        const decided = [...cueTones.values()].filter(Boolean).length;
+        log.info(
+          `tone scope: cue — ${decided} of ${cues.length} line(s) had a dominant tone; ` +
+            `${styled} word(s) styled`,
+        );
+      } else {
+        log.info(`tone scope: word — ${styled} word(s) styled (the rest keep the base style)`);
+      }
 
       // ---- --diagnostics: the full per-word table --------------------------
       // Works entirely offline: it needs a transcript and local audio, never
@@ -963,7 +1011,11 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
         });
         const rows: ProsodyDiagnosticRow[] = prosody.words.map((w) => {
-          const toneStyle = toneStyleFor(theme, w.tone, w.confidence);
+          // Read the decision that actually rendered, not a recomputation.
+          // Under --tone-scope cue this is the LINE's tone, which is what the
+          // viewer will see, even though the per-word measurement differed.
+          const a = applied.get(w.index);
+          const toneStyle = a?.style;
           const resolved = resolveWordStyle(baseStyle, false, {
             activeScale: opts.activeScale,
             activeBold: opts.activeBold,
@@ -977,8 +1029,8 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
             rmsDb: w.features.rmsDb,
             f0Hz: w.features.f0Hz ?? null,
             speakingRate: w.features.speakingRate,
-            tone: w.tone,
-            confidence: w.confidence,
+            tone: a?.tone ?? w.tone,
+            confidence: a?.confidence ?? w.confidence,
             font: resolved.fontFamily,
             bold: resolved.bold,
             scale: resolved.scale,
@@ -986,6 +1038,17 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
             styled: toneStyle !== undefined,
           };
         });
+        log.info('');
+        log.info(`  Theme:          ${theme.source}`);
+        log.info(`  Base font:      ${baseStyle.fontFamily}`);
+        log.info(`  Tone scope:     ${opts.toneScope}`);
+        log.info(`  Min confidence: ${theme.minConfidence}`);
+        log.info(
+          `  Active word:    scale ${opts.activeScale}, colour ${baseStyle.activeColor}` +
+            `${opts.activeBold ? ', real bold face' : ''}`,
+        );
+        log.info(`  Words styled:   ${rows.filter((r) => r.styled).length} of ${rows.length}`);
+        log.info('');
         log.info('prosody diagnostics (local measurements → resolved style):');
         for (const line of formatProsodyDiagnostics(rows).split('\n')) log.info(line);
         log.info(
@@ -1006,6 +1069,8 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   const { width, height } = resolveOutput(opts.aspect, info);
   const style = resolveStyle(opts.style, height, {
     ...(opts.font !== undefined ? { fontFamily: opts.font } : {}),
+    // Theme first, CLI second: an explicit flag must beat a config file.
+    ...(theme.active?.color !== undefined ? { activeColor: theme.active.color } : {}),
     ...(opts.activeColor !== undefined ? { activeColor: opts.activeColor } : {}),
     ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
     ...(opts.positionY !== undefined ? { positionY: opts.positionY } : {}),
