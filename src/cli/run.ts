@@ -371,15 +371,20 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     log.info(`transcript → ${outputs.transcript}`);
   }
 
-  // ---- Roman / Hinglish script -------------------------------------------
+  // ---- Roman script -------------------------------------------------------
+  //
+  // Roman output is `detected source language + Roman script`. It is NOT a
+  // single "Hinglish" mode — Hinglish is what that combination is called when
+  // the source language is Hindi, and nothing more. Kannada romanised is still
+  // Kannada.
   //
   // Applied BEFORE Auto Trim and cue grouping so every downstream output — SRT,
   // ASS, JSON and the burned-in MP4 — carries the same text. Doing it later
-  // would romanise the video but leave the subtitle files in Devanagari.
+  // would romanise the video but leave the subtitle files in their native script.
   //
   // Timings are not touched: same audio, same word boundaries, only spelling.
   if (opts.script === 'roman') {
-    log.step('Transliterating to Roman (Hinglish)');
+    log.step('Transliterating to Roman script');
     const { detectLanguage, isLowConfidence } = await import('../transliterate/detect.js');
     const { resolveTransliterator } = await import('../transliterate/providers.js');
     const { providerSupports, explainUnsupported } = await import('../transliterate/capabilities.js');
@@ -419,8 +424,22 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       transliterationSkipped = 'unknown';
     }
 
+    // ---- Already Roman: nothing to transliterate ---------------------------
+    // A Latin-script source language (English, most obviously) is already in
+    // Roman letters. Demanding a transliteration backend for it would kill an
+    // otherwise correct `--language auto` run the moment the video turned out
+    // not to be Indic. toRomanScript returns the transcript untouched; the
+    // capability probe below must not fire first.
+    const { romanMode } = await import('../transliterate/roman-mode.js');
+    if (romanLang && romanMode(romanLang).alreadyRoman) {
+      log.info(
+        `${getLanguage(romanLang)?.name ?? romanLang} is already written in Roman letters — ` +
+          `nothing to transliterate.`,
+      );
+    }
+
     // ---- Provider capability, checked BEFORE any request ------------------
-    if (!transliterationSkipped) {
+    if (!transliterationSkipped && !(romanLang && romanMode(romanLang).alreadyRoman)) {
       const chosen = opts.transliterate ?? 'auto';
       let available = false;
       let why = '';
@@ -499,15 +518,34 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
     // ---- Run summary -------------------------------------------------------
     // One block the user can paste into a bug report, answering: what language
-    // did it think this was, which backend ran, and did anything degrade?
-    const langName = getLanguage(detection?.language ?? '')?.name ?? (detection?.language || 'unknown');
-    log.info(`Detected language: ${langName} (${detection?.language || '?'})`);
-    log.info(`Roman provider:    ${romanised.provider}`);
-    log.info(`Code-switching:    ${opts.codeSwitching ? 'enabled' : 'disabled'}`);
-    log.info(`English protection:${opts.protectEnglish ? ' enabled' : ' DISABLED'}`);
-    log.info(`Transliteration:   ${romanised.batching?.batches ?? 1} batch(es)`);
-    log.info(`Fallback:          ${romanised.fallbackUsed ?? 'none'}` +
+    // did it think this was, which mode did that put it in, which backend ran,
+    // and did anything degrade?
+    //
+    // "Transliteration mode" is the line that matters most here. It names the
+    // SOURCE language, so a Kannada video that was wrongly routed through Hindi
+    // would be visible at a glance instead of hiding behind a generic label
+    // that says "Hinglish" no matter what ran.
+    const m = romanised.mode;
+    log.info(`Detected language:  ${m.languageName} (${m.language || '?'})`);
+    log.info(`Output script:      Roman`);
+    log.info(`Transliteration:    ${m.label}`);
+    log.info(`Provider:           ${romanised.provider}`);
+    log.info(`English protection: ${opts.protectEnglish ? 'enabled' : 'DISABLED'}`);
+    log.info(`Code-switching:     ${opts.codeSwitching ? 'enabled' : 'disabled'}`);
+    log.info(`Batches:            ${romanised.batching?.batches ?? 1}`);
+    log.info(`Fallback:           ${romanised.fallbackUsed ?? 'none'}` +
       (romanised.fallbackReason ? `  (${romanised.fallbackReason})` : ''));
+
+    // The source language must survive romanisation. Changing the script does
+    // not change the language, and anything downstream that keys off it (fonts,
+    // filler lexicons, the JSON output) would silently misbehave if it did.
+    if (detection?.language && transcript.language !== asrTranscript.language) {
+      throw new CaptionEngineError(
+        `Romanisation changed the transcript language from "${asrTranscript.language}" ` +
+          `to "${transcript.language}".`,
+        'Romanisation changes the script, never the source language. This is a pipeline bug.',
+      );
+    }
 
     // The single most important line in this block: the user asked for Roman
     // and some or all of the output is not Roman. Never let that pass quietly.
@@ -521,7 +559,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
     const q = romanised.offline ? 'offline rules — lower quality on loanwords' : 'model';
     log.info(`provider   ${romanised.provider} (${q})`);
-    log.info(`glossary   ${romanised.glossarySize} entries, ${romanised.glossaryHits.length} phrase hit(s)`);
+    log.info(
+      `glossary   ${romanised.glossarySize} entries applicable to ${m.languageName}, ` +
+        `${romanised.glossaryHits.length} phrase hit(s)`,
+    );
     log.info(
       `tokens     ${romanised.converted} romanised, ${romanised.preserved} preserved ` +
         `(English/protected)`,

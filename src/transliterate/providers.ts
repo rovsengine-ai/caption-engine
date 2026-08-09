@@ -631,8 +631,24 @@ function describe(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Sarvam wants a regional tag ("kn-IN") where we carry an ISO-639-1 code.
+ *
+ * There is deliberately NO default here. The previous `?? 'hi'` never fired
+ * (String.split always yields a string, so `??` could not catch an empty
+ * language) and would have been wrong if it had: inventing Hindi for a language
+ * we failed to determine is precisely how a Kannada video ends up romanised by
+ * Hindi rules. An unknown language is a bug upstream, and it says so.
+ */
 function normaliseLang(l: string): string {
-  const base = (l.split('-')[0] ?? 'hi').toLowerCase();
+  const base = (l.split('-')[0] ?? '').trim().toLowerCase();
+  if (!base) {
+    throw new TransliterationConfigError(
+      'Sarvam transliteration was called without a source language.',
+      'The source language must be detected or passed with --language before romanising.\n' +
+        'This is a pipeline bug — please report it.',
+    );
+  }
   return `${base}-IN`;
 }
 

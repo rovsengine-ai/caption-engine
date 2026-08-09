@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CaptionEngineError } from '../errors.js';
+import { primaryScript, scriptForLanguage } from '../text/script.js';
 
 /**
  * Hinglish glossary: phrase-level protection and reverse-loanword mapping.
@@ -212,6 +213,42 @@ function reattachPunctuation(original: string, replacement: string): string {
   const lead = m?.[1] ?? '';
   const trail = (m?.[3] ?? '').replace(/।/g, '.').replace(/॥/g, '.');
   return lead + replacement + trail;
+}
+
+/**
+ * Keep only the entries that can apply to a given source language.
+ *
+ * The built-in glossary is a HINDI artefact: its mappings are keyed on
+ * Devanagari-written English ("चीट डे => cheat day"). Those keys can never match
+ * a Kannada or Tamil token, so leaving them in was harmless in practice — but it
+ * reported 119 mappings as "loaded" on a Kannada run, which is the kind of
+ * misleading number that makes people believe a Hindi code path is running when
+ * it is not. It is also a real cross-language coupling waiting for the first
+ * Latin-keyed mapping someone adds.
+ *
+ * The rule, deliberately narrow:
+ *
+ *   - a mapping whose source tokens are written in some OTHER Indic script is
+ *     dropped: it belongs to a different language;
+ *   - a mapping keyed on Latin, or on this language's own script, is kept;
+ *   - protected phrases are ALWAYS kept. Protecting English is language-neutral
+ *     — English survives inside Kannada speech for exactly the same reason it
+ *     survives inside Hindi speech — and dropping them would break the one
+ *     guarantee that has nothing to do with Hindi.
+ */
+export function glossaryForLanguage(g: Glossary, language: string): Glossary {
+  const own = scriptForLanguage(language);
+  const mappings = g.mappings.filter((entry) =>
+    entry.from.every((tok) => {
+      const s = primaryScript(tok);
+      return s === 'Latin' || s === 'Common' || s === own;
+    }),
+  );
+  return {
+    mappings,
+    protectedPhrases: g.protectedPhrases,
+    size: mappings.length + g.protectedPhrases.length,
+  };
 }
 
 /** Merge glossaries; later entries win on conflict. */

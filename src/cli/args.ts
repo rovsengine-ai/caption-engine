@@ -115,10 +115,14 @@ APPEARANCE
       --max-words <n>       Max words shown at once
       --crop-focus <0..1>   Horizontal focus when reframing      (default: 0.5)
       --script <mode>       native | roman   (default: native)
-                            roman = mixed Hinglish: Indic words become readable
-                            Roman, English words stay as they are. Not translation.
-                              आज meeting बहुत important है
-                              → Aaj meeting bahut important hai
+                            roman = the DETECTED language written in Roman
+                            letters. Not translation, and not always Hinglish —
+                            Hinglish is only what this is called for Hindi.
+                              hi  आज meeting बहुत important है
+                                  → Aaj meeting bahut important hai   (Hinglish)
+                              kn  ಇದು ಒಂದು important meeting
+                                  → Idu ondu important meeting        (Kannglish)
+                            English words stay as they are in every language.
       --transliterate <b>   auto | local | sarvam | http   (default: auto —
                             sarvam/http if configured, else local)
                             local  offline rules. LOWER QUALITY on English written

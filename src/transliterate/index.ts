@@ -6,8 +6,10 @@ import {
 import { explainUnsupported } from './capabilities.js';
 import { isIndicScript } from './script-utils.js';
 import {
-  loadGlossary, mergeGlossaries, applyGlossary, type Glossary, type GlossaryHit,
+  loadGlossary, mergeGlossaries, applyGlossary, glossaryForLanguage,
+  type Glossary, type GlossaryHit,
 } from './glossary.js';
+import { romanMode, type RomanMode } from './roman-mode.js';
 
 /**
  * Native script → natural mixed Hinglish.
@@ -40,6 +42,7 @@ export * from './capabilities.js';
 export * from './detect.js';
 export * from './script-utils.js';
 export * from './glossary.js';
+export * from './roman-mode.js';
 export { transliterateText, transliterateToken, hasDevanagari } from './devanagari.js';
 
 /** Why a token ended up the way it did. */
@@ -65,6 +68,14 @@ export interface TokenDiagnostic {
 export interface RomanisationResult {
   transcript: Transcript;
   provider: string;
+  /**
+   * The source language the romanisation actually ran as, and what that mode is
+   * called. Roman output is `sourceLanguage + roman script`, never a generic
+   * "Hinglish" mode — Hinglish is only `hi`. Recorded on the result so a caller
+   * can prove which language was used rather than inferring it from the fact
+   * that the output happens to be in Latin letters.
+   */
+  mode: RomanMode;
   /** True when the backend needs no network/credentials. */
   offline: boolean;
   converted: number;
@@ -150,13 +161,19 @@ export async function romaniseTranscript(
 ): Promise<RomanisationResult> {
   const protectEnglish = opts.protectEnglish ?? true;
   const language = opts.language ?? transcript.language;
+  const mode = romanMode(language);
 
   // ---- 1. Glossary -------------------------------------------------------
+  // Filtered to the source language: the built-in glossary is keyed on
+  // Devanagari-written English, which belongs to Hindi and has no business
+  // being counted — or one day applied — on a Kannada run. Protected English
+  // phrases survive the filter, because protecting English is not a Hindi
+  // concern.
   const glossaries: Glossary[] = [];
   if (opts.useDefaultGlossary !== false) glossaries.push(loadGlossary());
   if (opts.glossaryPath) glossaries.push(loadGlossary(opts.glossaryPath));
   const glossary = glossaries.length
-    ? mergeGlossaries(...glossaries)
+    ? glossaryForLanguage(mergeGlossaries(...glossaries), language)
     : { mappings: [], protectedPhrases: [], size: 0 };
 
   const original = transcript.words.map((w) => w.text);
@@ -248,8 +265,13 @@ export async function romaniseTranscript(
   });
 
   return {
-    transcript: { ...transcript, words },
+    // The source language stays attached to the transcript. Romanisation
+    // changes the script, never the language: Kannada written in Roman letters
+    // is still Kannada, and a downstream consumer that needs to know which it
+    // is must not have to guess from the alphabet.
+    transcript: { ...transcript, language: transcript.language, words },
     provider: provider.name,
+    mode,
     offline: provider.offline,
     converted: convertedCount,
     preserved: preservedCount,
@@ -420,6 +442,19 @@ export async function toRomanScript(
   const language = opts.language ?? transcript.language;
   const policy: RomanFallback = opts.fallback ?? 'error';
   const env = opts.env ?? process.env;
+  const mode = romanMode(language);
+
+  // ---- Already Roman: a no-op, not a failure -----------------------------
+  // English (and any other Latin-script source) is already in Roman letters.
+  // Refusing here used to break `--language auto` the moment a video turned out
+  // to be in English: the detector was right, and the run died anyway.
+  //
+  // This is narrow on purpose. It fires only when the SOURCE language is
+  // Latin-script, never when a backend merely failed to cover the language —
+  // that must still be an error or an explicitly chosen fallback.
+  if (mode.alreadyRoman) {
+    return identityResult(transcript, mode);
+  }
 
   // Resolve the backend under the fallback policy. Everything below this point
   // is unchanged: the policy decides WHICH provider runs, never whether the
@@ -443,6 +478,39 @@ export async function toRomanScript(
     fallbackUsed,
     fallbackReason,
     keptNativeScript: result.keptNativeScript,
+  };
+}
+
+/**
+ * The result of romanising something that is already Roman: everything
+ * unchanged, and honest about it.
+ *
+ * `keptNativeScript` is false because the native script here IS Latin — there
+ * is no discrepancy between what was asked for and what came out, which is the
+ * only thing that flag is meant to warn about.
+ */
+function identityResult(transcript: Transcript, mode: RomanMode): RomanisationResult {
+  return {
+    transcript,
+    provider: 'none',
+    mode,
+    offline: true,
+    converted: 0,
+    preserved: transcript.words.length,
+    glossaryHits: [],
+    diagnostics: transcript.words.map((w, index) => ({
+      index,
+      original: w.text,
+      final: w.text,
+      stage: 'already-latin' as const,
+      language: w.language,
+      start: w.start,
+      end: w.end,
+    })),
+    glossarySize: 0,
+    fallbackUsed: null,
+    fallbackReason: null,
+    keptNativeScript: false,
   };
 }
 

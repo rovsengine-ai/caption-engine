@@ -295,19 +295,35 @@ node dist/src/cli.js podcast.m4a --language te --format ass --output captions.as
 Audio input with `--format mp4` renders captions over a solid colour, sized to `--aspect`,
 with the audio intact — useful for audiograms or for keying over an edit.
 
-### Roman / Hinglish output
+### Roman output (Hinglish, Kannglish, Tenglish, Tanglish, Manglish)
 
 ```bash
 node dist/src/cli.js render input.mp4 --transcript t.json --language hi --script roman -o out.mp4
 ```
 
 Indic-script words become readable Roman; **English words are left exactly as they
-are**. This is mixed Hinglish, not translation and not scholarly transliteration:
+are**. Not translation, and not scholarly transliteration.
 
-| Input | Output |
-|---|---|
-| `आज meeting बहुत important है` | `Aaj meeting bahut important hai` |
-| `मैं आज आपको एक project दिखाता हूँ` | `Main aaj aapko ek project dikhata hoon` |
+**Roman output is `detected source language + Roman script`.** It is not one mode, and it
+is not always Hinglish — *Hinglish is the name of this combination for Hindi only*. Kannada
+romanised is still Kannada; it just uses Latin letters. The pipeline keeps the detected
+language attached to the transcript and to every word, and names it in the run summary, so
+"the output is in Latin letters" can never be mistaken for "the output is Hindi".
+
+| Source | Input | Output | Called |
+|---|---|---|---|
+| `hi` | `आज meeting बहुत important है` | `Aaj meeting bahut important hai` | Hinglish |
+| `kn` | `ಇದು ಒಂದು important meeting` | `Idu ondu important meeting` | Kannglish |
+| `te` | `ఇది ఒక important meeting` | `Idi oka important meeting` | Tenglish |
+| `ta` | `இது ஒரு important project` | `Idhu oru important project` | Tanglish |
+| `ml` | `ഇത് ഒരു important project` | `Ithu oru important project` | Manglish |
+| `en` | `already in English` | unchanged — a reported no-op | — |
+
+Each language is romanised **with its own rules**: `hi/mr/ne` may use the built-in
+Devanagari engine, and `kn/te/ta/ml/bn/gu/pa/or/as` go to a model backend with their own
+`source_language_code`. Kannada, Telugu, Tamil and Malayalam are never routed through Hindi
+logic — the Devanagari engine explicitly refuses them rather than passing text through
+untouched, and the test suite fails if that ever changes.
 
 What it will **not** do:
 
@@ -315,9 +331,19 @@ What it will **not** do:
 - reverse-translate — `meeting` stays `meeting`, never `मीटिंग`
 - emit ISO diacritics — `bahut khaas hai`, not `bahuta khāsa hai`
 
-Word count, order, punctuation, numbers and **timestamps** are unchanged: the same
-audio, the same word boundaries, only the spelling. The pipeline asserts this rather
-than trusting it, and fails if a backend violates it.
+Word count, order, punctuation, numbers, **timestamps** and the **source language** are
+unchanged: the same audio, the same word boundaries, only the spelling. The pipeline
+asserts this rather than trusting it, and fails if a backend violates it.
+
+Every Roman run prints which language it actually ran as:
+
+```
+Detected language:  Kannada (kn)
+Output script:      Roman
+Transliteration:    Kannada → Roman (Kannglish)
+Provider:           sarvam
+English protection: enabled
+```
 
 #### You do not need to know the language first
 
