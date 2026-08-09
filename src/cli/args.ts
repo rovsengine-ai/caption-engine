@@ -18,6 +18,8 @@ export interface CliOptions {
   autoTrim: boolean;
   trimSilence: number;
   keepFillers: boolean;
+  /** error | native | http — what to do when Roman output is unavailable. */
+  romanFallback: 'error' | 'native' | 'http';
   /** Suppress Auto Trim proposals below this confidence, 0..1. */
   minCutConfidence?: number;
   /** Seconds of audio kept on each side of a speech cut. */
@@ -83,9 +85,13 @@ INPUT
 
 CORE OPTIONS
   -o, --output <path>       Output file. Extension picks the format if --format is absent.
-  -l, --language <code>     Language code (hi, te, kn, ta, ml, bn, gu, pa, mr, en, ...).
-                            Omit to let the provider auto-detect — recommended for
-                            code-switched speech such as Hinglish.
+  -l, --language <code>     auto | hi | te | kn | ta | ml | bn | gu | pa | mr | en | ...
+                            "auto" (or omitting this) detects from the ASR result:
+                            the provider's own language tag first, corroborated by
+                            the dominant script. An explicit code ALWAYS wins over
+                            detection. Provider codes are normalised (hin→hi,
+                            kan→kn, tam→ta, tel→te, mal→ml, ben→bn, guj→gu,
+                            pan→pa, ori→or, asm→as, nep→ne, mar→mr, eng→en).
   -f, --format <fmt>        mp4 | srt | ass | json | all          (default: from -o, else mp4)
   -p, --provider <name>     elevenlabs | deepgram | sarvam        (default: $ASR_PROVIDER or elevenlabs)
 
@@ -103,8 +109,8 @@ APPEARANCE
                             Roman, English words stay as they are. Not translation.
                               आज meeting बहुत important है
                               → Aaj meeting bahut important hai
-      --transliterate <b>   local | sarvam | http   (default: auto — sarvam/http if
-                            configured, else local)
+      --transliterate <b>   auto | local | sarvam | http   (default: auto —
+                            sarvam/http if configured, else local)
                             local  offline rules. LOWER QUALITY on English written
                                    in Devanagari; leans on the glossary.
                             sarvam model-based, needs SARVAM_API_KEY
@@ -113,6 +119,18 @@ APPEARANCE
                             Extra glossary merged over the built-in one. Maps
                             Devanagari-written English back to real spelling
                             (चीट डे => cheat day) and protects Latin phrases.
+      --roman-fallback <p>  What to do when Roman output is unavailable for the
+                            detected language                    (default: error)
+                              error   stop, with instructions
+                              native  keep the ORIGINAL script and carry on. Always
+                                      reported, never silent, and only used when
+                                      romanisation is genuinely unavailable.
+                              http    use TRANSLITERATE_URL instead
+                            Kannada, Telugu, Tamil, Malayalam, Bengali, Gujarati,
+                            Punjabi, Odia and Assamese have no offline engine, so a
+                            failed Sarvam batch has nothing to fall back to. With
+                            "native" that batch keeps its script and is named in
+                            the report; with "error" the run stops.
       --protect-english     Never let a backend alter Latin/English tokens (default on)
       --no-protect-english  Disable that protection
       --diagnostics         Print the per-token table: original → final → stage
@@ -278,6 +296,9 @@ export function parseArgs(argv: string[]): ParsedCommand {
     codeSwitching: false,
     showDiagnostics: false,
     reviewCuts: false,
+    // 'error' preserves the pre-existing strict behaviour: asking for Roman and
+    // getting native back must be something you opted into.
+    romanFallback: 'error',
     allowStale: false,
     dryRun: false,
     verbose: false,
@@ -361,6 +382,20 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--cuts-in': o.cutsIn = needValue(a, next); i++; break;
       case '--cuts-out': o.cutsOut = needValue(a, next); i++; break;
       case '--work-dir': o.workDir = needValue(a, next); i++; break;
+      case '--roman-fallback': {
+        const v = (next ?? '').toLowerCase();
+        if (!['error', 'native', 'http'].includes(v)) {
+          throw new CaptionEngineError(
+            `--roman-fallback must be error, native or http (got "${next ?? ''}").`,
+            'error   refuse if Roman output is unavailable (default)\n' +
+              'native  keep the original script and continue, reported not silent\n' +
+              'http    use TRANSLITERATE_URL instead',
+          );
+        }
+        o.romanFallback = v as 'error' | 'native' | 'http';
+        i++;
+        break;
+      }
       case '--allow-stale': o.allowStale = true; break;
       case '--dry-run': o.dryRun = true; break;
       case '--json': o.json = true; break;

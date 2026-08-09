@@ -215,7 +215,9 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       (info.fps ? ` · ${info.fps}fps` : ''),
   );
 
-  if (opts.language) {
+  // "auto" is not a language code — it is the instruction to detect one.
+  const languageIsAuto = (opts.language ?? '').toLowerCase() === 'auto';
+  if (opts.language && !languageIsAuto) {
     const lang = getLanguage(opts.language);
     if (!lang) {
       throw new CaptionEngineError(
@@ -249,6 +251,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   let transliterationReport: import('../transliterate/index.js').RomanisationResult | undefined;
   /** Set when --script roman was requested but the backend cannot handle the language. */
   let transliterationSkipped: string | undefined;
+  let detection: import('../transliterate/detect.js').LanguageDetection | undefined;
   const wantVideo = opts.format === 'mp4' || opts.format === 'all';
   const wantSrt = opts.format === 'srt' || opts.format === 'all';
   const wantAss = opts.format === 'ass' || opts.format === 'all';
@@ -337,7 +340,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     }
 
     transcript = await provider.transcribe(readFileSync(audioPath), {
-      language: opts.language,
+      language: languageIsAuto ? undefined : opts.language,
       codeSwitching: opts.codeSwitching,
       keyterms: keyterms.length ? keyterms : undefined,
       diarize: false,
@@ -375,34 +378,79 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   // Timings are not touched: same audio, same word boundaries, only spelling.
   if (opts.script === 'roman') {
     log.step('Transliterating to Roman (Hinglish)');
-    const { toRomanScript, formatDiagnostics } = await import('../transliterate/index.js');
+    const { detectLanguage, isLowConfidence } = await import('../transliterate/detect.js');
     const { resolveTransliterator } = await import('../transliterate/providers.js');
-    const before = transcript.words.map((w) => ({ s: w.start, e: w.end }));
+    const { providerSupports, explainUnsupported } = await import('../transliterate/capabilities.js');
 
-    // The detected language may be one the chosen backend cannot romanise
-    // (e.g. auto-detected Telugu with the Devanagari-only local engine).
-    // Refusing to render at all would be worse than showing native script, so
-    // warn loudly and carry on rather than crashing on someone's long render.
-    const romanLang = opts.language ?? transcript.language;
-    let canRomanise = true;
-    try {
-      const probe = resolveTransliterator(opts.transliterate, romanLang);
-      if (!probe.supports(romanLang)) canRomanise = false;
-    } catch (e) {
-      canRomanise = false;
-      log.warn(e instanceof Error ? e.message : String(e));
+    // ---- Language ---------------------------------------------------------
+    // An explicit --language always wins; "auto" or omitted means detect.
+    const explicit = opts.language && opts.language.toLowerCase() !== 'auto'
+      ? opts.language
+      : undefined;
+    detection = detectLanguage(transcript, { explicit });
+    const romanLang = detection.language;
+
+    const langName = getLanguage(romanLang)?.name ?? romanLang ?? 'unknown';
+    log.info(
+      `Detected language: ${langName} (${romanLang || '?'})   ` +
+        `[${detection.source}${detection.source === 'explicit' ? '' : `, confidence ${detection.confidence.toFixed(2)}`}]`,
+    );
+    if (detection.alternatives.length > 0) {
+      log.info(`  also plausible: ${detection.alternatives.join(', ')} — same script`);
+    }
+    for (const w of detection.warnings) log.warn(w);
+    if (isLowConfidence(detection)) {
+      log.warn(
+        `Language detection confidence is ${detection.confidence.toFixed(2)}. ` +
+          `Pass --language ${romanLang || '<code>'} to be certain.`,
+      );
     }
 
-    if (!canRomanise) {
-      log.warn(
-        `Roman output is not available for "${romanLang}" with the selected backend — ` +
-          `keeping NATIVE script instead of failing.`,
-      );
-      log.warn(
-        'To get Roman output for this language, configure a model backend:\n' +
-          '    export SARVAM_API_KEY=...   then add: --transliterate sarvam',
-      );
-      transliterationSkipped = romanLang;
+    if (!romanLang) {
+      if (opts.romanFallback === 'error') {
+        throw new CaptionEngineError(
+          'Roman output was requested but no language could be determined.',
+          'Pass --language explicitly, e.g. --language hi, or use --roman-fallback native.',
+        );
+      }
+      log.warn('No language could be determined — keeping NATIVE script.');
+      transliterationSkipped = 'unknown';
+    }
+
+    // ---- Provider capability, checked BEFORE any request ------------------
+    if (!transliterationSkipped) {
+      const chosen = opts.transliterate ?? 'auto';
+      let available = false;
+      let why = '';
+      try {
+        const probe = resolveTransliterator(
+          opts.transliterate, romanLang, process.env,
+          { allowNativeFallback: opts.romanFallback === 'native' },
+        );
+        available = probe.supports(romanLang);
+        if (!available) why = `"${probe.name}" does not cover ${romanLang}`;
+      } catch (e) {
+        available = false;
+        why = e instanceof Error ? e.message : String(e);
+      }
+
+      if (!available) {
+        if (opts.romanFallback === 'error') {
+          // Default. Refusing beats rendering something that looks fine to
+          // anyone who cannot read the script.
+          throw new CaptionEngineError(
+            `Roman output is not available for "${romanLang}".`,
+            `${why}\n\n${explainUnsupported(romanLang, chosen === 'auto' ? 'local' : chosen as never)}`,
+          );
+        }
+        // 'native' and 'http' are NOT short-circuited here. Both are handled
+        // inside toRomanScript so that every path — success, native fallback,
+        // http fallback — produces the same run-summary block and the same
+        // "output is still in the original script" warning. Skipping the call
+        // would skip the reporting, which is the one thing that must not
+        // happen when the user asked for Roman and is not getting it.
+        log.warn(`Roman output unavailable (${why}) — applying --roman-fallback ${opts.romanFallback}.`);
+      }
     }
   }
 
@@ -417,9 +465,11 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
     const romanised = await toRomanScript(transcript, {
       provider: opts.transliterate,
-      language: opts.language ?? transcript.language,
+      // Detection already ran above and honoured any explicit --language.
+      language: detection?.language ?? opts.language ?? transcript.language,
       glossaryPath: opts.glossary ?? process.env.HINGLISH_GLOSSARY,
       protectEnglish: opts.protectEnglish,
+      fallback: opts.romanFallback,
     });
     transcript = romanised.transcript;
     transliterationReport = romanised;
@@ -440,6 +490,28 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           'Romanisation must never change timings. This is a pipeline bug.',
         );
       }
+    }
+
+    // ---- Run summary -------------------------------------------------------
+    // One block the user can paste into a bug report, answering: what language
+    // did it think this was, which backend ran, and did anything degrade?
+    const langName = getLanguage(detection?.language ?? '')?.name ?? (detection?.language || 'unknown');
+    log.info(`Detected language: ${langName} (${detection?.language || '?'})`);
+    log.info(`Roman provider:    ${romanised.provider}`);
+    log.info(`Code-switching:    ${opts.codeSwitching ? 'enabled' : 'disabled'}`);
+    log.info(`English protection:${opts.protectEnglish ? ' enabled' : ' DISABLED'}`);
+    log.info(`Transliteration:   ${romanised.batching?.batches ?? 1} batch(es)`);
+    log.info(`Fallback:          ${romanised.fallbackUsed ?? 'none'}` +
+      (romanised.fallbackReason ? `  (${romanised.fallbackReason})` : ''));
+
+    // The single most important line in this block: the user asked for Roman
+    // and some or all of the output is not Roman. Never let that pass quietly.
+    if (romanised.keptNativeScript) {
+      const nb = romanised.batching?.nativeBatches ?? [];
+      log.warn(
+        'SOME OUTPUT IS STILL IN THE ORIGINAL SCRIPT despite --script roman.' +
+          (nb.length ? `  Batch(es) ${nb.join(', ')} kept native script.` : ''),
+      );
     }
 
     const q = romanised.offline ? 'offline rules — lower quality on loanwords' : 'model';
@@ -748,7 +820,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     } else {
       const { makeAnthropicCompletion } = await import('../clips/llm.js');
       clips = await findClips(workingTranscript, makeAnthropicCompletion(key), {
-        language: opts.language ?? workingTranscript.language,
+        language: languageIsAuto ? workingTranscript.language : (opts.language ?? workingTranscript.language),
       });
       log.info(`${clips.length} clip candidates`);
       for (const c of clips) {

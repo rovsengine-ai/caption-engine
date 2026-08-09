@@ -319,6 +319,121 @@ Word count, order, punctuation, numbers and **timestamps** are unchanged: the sa
 audio, the same word boundaries, only the spelling. The pipeline asserts this rather
 than trusting it, and fails if a backend violates it.
 
+#### You do not need to know the language first
+
+```bash
+node dist/src/cli.js input.mp4 \
+  --language auto \
+  --script roman \
+  --transliterate sarvam \
+  --roman-fallback error
+```
+
+`--language auto` (or omitting `--language`) decides from the ASR result:
+
+1. **the provider's own language tag**, normalised — `hin→hi`, `kan→kn`, `tam→ta`,
+   `tel→te`, `mal→ml`, `mar→mr`, `ben→bn`, `guj→gu`, `pan→pa`, `ori→or`, `asm→as`,
+   `nep→ne`, `eng→en`. That tag is an acoustic judgement and is the only signal that can
+   separate Hindi from Marathi.
+2. **the dominant script**, as corroboration — and as the answer when the provider said
+   nothing, or said something the script contradicts.
+
+**An explicit `--language kn` always wins.** If it disagrees with the script, the run says
+so and obeys you anyway.
+
+**Script is not language, and the tool does not pretend otherwise.** Devanagari is written
+by hi, mr, ne, sa, kok and mai; Bengali script by bn and as. When only script evidence is
+available the alternatives are named and the confidence is capped:
+
+```
+Detected language: Hindi (hi)   [asr, confidence 1.00]
+  also plausible: mr, ne, sa, kok, mai — same script
+```
+
+Low confidence is called out explicitly rather than buried.
+
+#### Provider capability
+
+Checked **before** any request, so an unsupported language fails in a second rather than
+after an upload:
+
+| Backend | Languages | Needs |
+|---|---|---|
+| `local` | hi, mr, ne, sa, kok, mai — Devanagari only | nothing |
+| `sarvam` | hi, mr, ne, te, kn, ta, ml, bn, gu, pa, or, as | `SARVAM_API_KEY` |
+| `http` | whatever your endpoint covers | `TRANSLITERATE_URL` |
+| `native` | **nothing** — performs no transliteration | fallback only |
+
+`--transliterate native` is rejected. Keeping the original script is reachable only via
+`--roman-fallback native`, so it is always a decision you made and were told about.
+
+#### When Roman output is not available: `--roman-fallback`
+
+```bash
+--roman-fallback error     # default: stop, with instructions
+--roman-fallback native    # keep the ORIGINAL script, continue, and report it
+--roman-fallback http      # use TRANSLITERATE_URL instead
+```
+
+**Never silent.** Asking for Roman and quietly getting Kannada back is worse than an error,
+because the render succeeds and looks fine to anyone who cannot read the script. Every run
+prints:
+
+```
+Detected language: Kannada (kn)
+Roman provider:    native
+Code-switching:    disabled
+English protection: enabled
+Transliteration:   1 batch(es)
+Fallback:          native  (the "local" transliterator does not cover "kn")
+! SOME OUTPUT IS STILL IN THE ORIGINAL SCRIPT despite --script roman.
+```
+
+#### Kannada, Telugu, Tamil and the rest: the Sarvam-only languages
+
+`kn te ta ml bn gu pa or as` have **no offline transliterator** — Sarvam is the only
+backend. Sarvam occasionally returns a different number of tokens than the words sent in a
+batch. That output cannot be aligned to word timings, so it is discarded; the strict check
+never bends. Previously there was nothing to fall back to and the whole render died on one
+bad batch.
+
+Now:
+
+```bash
+# stop on a mismatch (default, unchanged behaviour)
+node dist/src/cli.js talk.mp4 --script roman --transliterate sarvam --language auto
+
+# keep the failed batch in Kannada, romanise the rest, and name what happened
+node dist/src/cli.js talk.mp4 --script roman --transliterate sarvam \
+  --language auto --roman-fallback native
+
+# send the failed batch to your own service instead
+export TRANSLITERATE_URL=https://your-service/transliterate
+node dist/src/cli.js talk.mp4 --script roman --transliterate sarvam \
+  --language auto --roman-fallback http
+```
+
+Only the failed batch degrades — good batches still romanise — and the report names it:
+
+```
+! batch 3/7: Sarvam returned a token count that does not match the 14 words sent, twice
+  — no offline transliterator for "kn", so these 14 word(s) KEEP THEIR NATIVE SCRIPT
+```
+
+Word count, word order and every timestamp are unchanged either way. English Latin tokens
+are never sent to the API and come back byte-identical.
+
+#### Code-switched examples
+
+| Input | Output |
+|---|---|
+| `आज meeting बहुत important है` | `Aaj meeting bahut important hai` |
+| `ಇದು ಒಂದು important meeting` | Kannada romanised; `important meeting` untouched |
+| `இது ஒரு important project` | Tamil romanised; `important project` untouched |
+
+Numbers, punctuation, names, brands, URLs and hashtags are preserved — anything not in an
+Indic script is never sent to a backend.
+
 **Backends** (`--transliterate`):
 
 | Name | Needs | Covers | Notes |
@@ -669,7 +784,7 @@ will be materially worse. Measure it on your own clips.
 ## Development
 
 ```bash
-npm test                    # 605 tests
+npm test                    # 768 tests
 npm run evaluate            # measured Hinglish + Auto Trim report
 npm run test:render         # real FFmpeg renders + pixel assertions
 npm run test:raster         # rasterisation: functional probes, transparency, all scripts

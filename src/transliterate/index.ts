@@ -1,6 +1,9 @@
 import type { Transcript, Word } from '../types.js';
 import { CaptionEngineError } from '../errors.js';
-import { resolveTransliterator, type TransliterationProvider } from './providers.js';
+import {
+  resolveTransliterator, NativeScriptPassthrough, type TransliterationProvider,
+} from './providers.js';
+import { explainUnsupported } from './capabilities.js';
 import { isIndicScript } from './script-utils.js';
 import {
   loadGlossary, mergeGlossaries, applyGlossary, type Glossary, type GlossaryHit,
@@ -33,6 +36,8 @@ import {
  */
 
 export * from './providers.js';
+export * from './capabilities.js';
+export * from './detect.js';
 export * from './script-utils.js';
 export * from './glossary.js';
 export { transliterateText, transliterateToken, hasDevanagari } from './devanagari.js';
@@ -67,6 +72,12 @@ export interface RomanisationResult {
   glossaryHits: GlossaryHit[];
   diagnostics: TokenDiagnostic[];
   glossarySize: number;
+  /** Set when the fallback policy had to be used. null on the normal path. */
+  fallbackUsed: RomanFallback | null;
+  /** Why the fallback was needed. Always accompanies fallbackUsed. */
+  fallbackReason: string | null;
+  /** True when the output is still in the original script despite --script roman. */
+  keptNativeScript: boolean;
   /**
    * Set by backends that split the work into several API requests. Present so
    * a partial degradation is visible: if two batches out of thirty fell back to
@@ -80,6 +91,10 @@ export interface RomanisationResult {
     fallbackBatches: number;
     tokensViaApi: number;
     tokensViaFallback: number;
+    /** Words left in their original script by --roman-fallback native. */
+    tokensViaNative: number;
+    /** Which batches those were. Named, so the report can point at them. */
+    nativeBatches: number[];
     largestInputChars: number;
     notes: string[];
   };
@@ -98,7 +113,17 @@ export interface RomanisationOptions {
    */
   protectEnglish?: boolean;
   env?: NodeJS.ProcessEnv;
+  /**
+   * What to do when Roman output is impossible for this language/backend.
+   *
+   * 'error'  (default) refuse, with instructions. Backwards compatible.
+   * 'native' keep the original script and continue, REPORTED not silent.
+   * 'http'   use TRANSLITERATE_URL instead.
+   */
+  fallback?: RomanFallback;
 }
+
+export type RomanFallback = 'error' | 'native' | 'http';
 
 /** Did the ASR explicitly mark this word as English? */
 function isAsrEnglish(w: Word): boolean {
@@ -226,6 +251,16 @@ export async function romaniseTranscript(
     diagnostics,
     glossarySize: glossary.size,
     batching: readBatchStats(provider),
+    // romaniseTranscript is given a provider; it does not choose one, so it
+    // knows nothing about policy. toRomanScript fills these in.
+    fallbackUsed: provider.name === 'native' ? 'native' : null,
+    fallbackReason: null,
+    // Individual Sarvam batches may have kept native script even when the run
+    // as a whole succeeded. Either way the caller is looking at some original
+    // script and must say so — this is what makes "never silently native"
+    // enforceable rather than aspirational.
+    keptNativeScript:
+      provider.name === 'native' || (readBatchStats(provider)?.tokensViaNative ?? 0) > 0,
   };
 }
 
@@ -243,6 +278,8 @@ function readBatchStats(provider: TransliterationProvider): RomanisationResult['
     retries: Number(s.retries) || 0,
     fallbackBatches: Number(s.fallbackBatches) || 0,
     tokensViaApi: Number(s.tokensViaApi) || 0,
+    tokensViaNative: Number(s.tokensViaNative) || 0,
+    nativeBatches: Array.isArray(s.nativeBatches) ? (s.nativeBatches as number[]) : [],
     tokensViaFallback: Number(s.tokensViaFallback) || 0,
     largestInputChars: Number(s.largestInputChars) || 0,
     notes: Array.isArray(s.notes) ? (s.notes as string[]) : [],
@@ -297,15 +334,102 @@ export function withScript(transcript: Transcript, script: 'native' | 'roman'): 
 }
 
 /** Resolve a provider, romanise, switch script, capitalise sentences. */
+/**
+ * Choose a backend, honouring the fallback policy.
+ *
+ * The policy only ever widens what is acceptable. It never relaxes the token
+ * or timestamp checks, and it never turns a successful romanisation into a
+ * native-script one — it applies solely when Roman output is genuinely
+ * unavailable.
+ */
+function resolveWithPolicy(
+  requested: string | undefined,
+  language: string,
+  policy: RomanFallback,
+  env: NodeJS.ProcessEnv,
+): { provider: TransliterationProvider; fallbackUsed: RomanFallback | null; fallbackReason: string | null } {
+  const allowNative = policy === 'native';
+
+  try {
+    const p = resolveTransliterator(requested, language, env, { allowNativeFallback: allowNative });
+    if (p.supports(language)) return { provider: p, fallbackUsed: null, fallbackReason: null };
+
+    // Configured, but does not cover this language.
+    const reason = `"${p.name}" does not support "${language}"`;
+    return applyPolicy(language, policy, env, reason);
+  } catch (err) {
+    if (policy === 'error') throw err;
+    return applyPolicy(language, policy, env, err instanceof Error ? err.message : String(err));
+  }
+}
+
+function applyPolicy(
+  language: string,
+  policy: RomanFallback,
+  env: NodeJS.ProcessEnv,
+  reason: string,
+): { provider: TransliterationProvider; fallbackUsed: RomanFallback | null; fallbackReason: string } {
+  if (policy === 'http') {
+    if (!env.TRANSLITERATE_URL) {
+      throw new CaptionEngineError(
+        `--roman-fallback http was requested, but TRANSLITERATE_URL is not set.`,
+        `Set it, or choose a different policy:\n` +
+          `  export TRANSLITERATE_URL=https://your-service/transliterate\n` +
+          `  …or  --roman-fallback native   to keep the original script instead.`,
+      );
+    }
+    return {
+      provider: resolveTransliterator('http', language, env),
+      fallbackUsed: 'http',
+      fallbackReason: reason,
+    };
+  }
+
+  if (policy === 'native') {
+    return {
+      provider: new NativeScriptPassthrough(),
+      fallbackUsed: 'native',
+      fallbackReason: reason,
+    };
+  }
+
+  throw new CaptionEngineError(
+    `Roman output is not available for "${language}".`,
+    `${reason}\n\n${explainUnsupported(language, 'local')}`,
+  );
+}
+
 export async function toRomanScript(
   transcript: Transcript,
   opts: RomanisationOptions = {},
 ): Promise<RomanisationResult> {
   const language = opts.language ?? transcript.language;
-  const provider = resolveTransliterator(opts.provider, language, opts.env);
+  const policy: RomanFallback = opts.fallback ?? 'error';
+  const env = opts.env ?? process.env;
+
+  // Resolve the backend under the fallback policy. Everything below this point
+  // is unchanged: the policy decides WHICH provider runs, never whether the
+  // alignment checks apply.
+  const { provider, fallbackUsed, fallbackReason } = resolveWithPolicy(
+    opts.provider, language, policy, env,
+  );
   const result = await romaniseTranscript(transcript, provider, opts);
+
+  // Native passthrough must not be dressed up as Roman: leave the script tag
+  // and the capitalisation alone so downstream consumers, and the user reading
+  // the JSON, can see what they actually got.
+  if (fallbackUsed === 'native') {
+    return { ...result, fallbackUsed, fallbackReason, keptNativeScript: true };
+  }
+
   const switched = withScript(result.transcript, 'roman');
-  return { ...result, transcript: capitaliseSentences(switched) };
+  return {
+    ...result,
+    transcript: capitaliseSentences(switched),
+    fallbackUsed,
+    fallbackReason,
+    keptNativeScript: result.keptNativeScript,
+  };
 }
 
 /**

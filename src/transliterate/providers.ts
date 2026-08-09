@@ -10,10 +10,15 @@ import {
 /**
  * Transliteration backends.
  *
- * There is NO no-op provider. Requesting Roman output and silently getting
- * Devanagari back is the worst possible outcome — it looks like the feature
- * ran. Every provider here does real work, and asking for one that is not
- * configured is an error with instructions, never a silent pass-through.
+ * Requesting Roman output and SILENTLY getting Devanagari back is the worst
+ * possible outcome — it looks like the feature ran. So asking for a backend
+ * that is not configured is an error with instructions, never a quiet
+ * pass-through.
+ *
+ * There is exactly one no-op, `NativeScriptPassthrough`, and it is unreachable
+ * from `--transliterate`. It can only be selected by `--roman-fallback native`,
+ * which is a decision the user makes explicitly and is told about in the run
+ * report. "Silent" is the thing being prevented here, not "native".
  */
 
 export type ProviderQuality = 'model' | 'rules';
@@ -75,6 +80,34 @@ export class LocalHinglishTransliterator implements TransliterationProvider {
   }
 }
 
+/**
+ * No-op "provider": returns every token exactly as it arrived.
+ *
+ * This is NOT a transliterator and must never be selected by `--transliterate`.
+ * It exists only as the target of `--roman-fallback native`, so that keeping the
+ * original script is something the user asked for and was told about, rather
+ * than something that quietly happened to them.
+ *
+ * The distinction matters: asking for Roman and silently getting Devanagari is
+ * worse than an error, because the render succeeds and looks fine until someone
+ * who reads the language sees it.
+ */
+export class NativeScriptPassthrough implements TransliterationProvider {
+  readonly name = 'native';
+  readonly description = 'no transliteration — original script preserved (explicit fallback only)';
+  readonly offline = true;
+  readonly quality = 'rules' as const;
+
+  /** Never claims support: it romanises nothing. */
+  supports(): boolean {
+    return false;
+  }
+
+  async romanise(tokens: string[]): Promise<string[]> {
+    return [...tokens];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sarvam — model-backed
 // ---------------------------------------------------------------------------
@@ -115,6 +148,16 @@ export interface SarvamOptions {
    * when it covers the language. One bad batch must not lose 2,000 good words.
    */
   fallback?: TransliterationProvider | null;
+  /**
+   * When a batch fails and NO offline engine covers the language (kn, te, ta,
+   * ml, bn, gu, pa, or, as — everything Sarvam alone serves), keep that batch's
+   * original script instead of failing the run.
+   *
+   * Off by default: silently returning native script when Roman was requested
+   * is the failure this whole module exists to prevent. Turned on only by
+   * `--roman-fallback native`, and every affected batch is named in the report.
+   */
+  allowNativeFallback?: boolean;
 }
 
 /** What happened on the last `romanise()` call. Surfaced by the CLI. */
@@ -125,6 +168,10 @@ export interface SarvamRunStats {
   fallbackBatches: number;
   tokensViaApi: number;
   tokensViaFallback: number;
+  /** Words returned unchanged in their original script by --roman-fallback native. */
+  tokensViaNative: number;
+  /** 1-based batch numbers that kept native script. Named, never just counted. */
+  nativeBatches: number[];
   tokensPreserved: number;
   largestInputChars: number;
   notes: string[];
@@ -162,6 +209,7 @@ export class SarvamTransliterator implements TransliterationProvider {
   private readonly baseDelayMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly fallbackOverride: TransliterationProvider | null | undefined;
+  private readonly allowNativeFallback: boolean;
 
   /** Reset at the start of every romanise() call. */
   stats: SarvamRunStats = emptyStats();
@@ -179,6 +227,7 @@ export class SarvamTransliterator implements TransliterationProvider {
     this.baseDelayMs = o.baseDelayMs ?? 400;
     this.sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.fallbackOverride = o.fallback;
+    this.allowNativeFallback = o.allowNativeFallback ?? false;
   }
 
   supports(language: string): boolean {
@@ -379,13 +428,35 @@ export class SarvamTransliterator implements TransliterationProvider {
     bi: number,
   ): Promise<string[]> {
     if (!fallback) {
+      // No offline engine covers this language — the Kannada case. Sarvam is
+      // the only backend for kn/te/ta/ml/bn/gu/pa/or/as, so when one of its
+      // batches comes back with the wrong token count there is nothing to
+      // romanise with.
+      //
+      // The strict timestamp check is never relaxed: mismatched output is
+      // discarded, not forced onto word timings. The only question is what to
+      // do with the batch afterwards, and that is the user's policy.
+      if (this.allowNativeFallback) {
+        this.stats.fallbackBatches++;
+        this.stats.tokensViaNative += batch.tokens.length;
+        this.stats.nativeBatches.push(bi + 1);
+        this.stats.notes.push(
+          `batch ${bi + 1}/${this.stats.batches}: ${why} — no offline transliterator for ` +
+            `"${language}", so these ${batch.tokens.length} word(s) KEEP THEIR NATIVE SCRIPT ` +
+            `(--roman-fallback native)`,
+        );
+        return [...batch.tokens];
+      }
       throw new CaptionEngineError(
         `Sarvam failed on batch ${bi + 1} of ${this.stats.batches} (${why}), and there is no ` +
           `offline transliterator for "${language}" to fall back to.`,
         `Options:\n` +
           `  • Retry — the failure may be temporary.\n` +
-          `  • Point at another service:  export TRANSLITERATE_URL=...  --transliterate http\n` +
-          `  • Keep the native script:    drop --script roman`,
+          `  • Keep the native script for the failed batch only, and be told which:\n` +
+          `      --roman-fallback native\n` +
+          `  • Point at another service:\n` +
+          `      export TRANSLITERATE_URL=...   --roman-fallback http\n` +
+          `  • Or drop --script roman entirely.`,
       );
     }
     const out = await fallback.romanise(batch.tokens, language);
@@ -409,8 +480,8 @@ export class SarvamTransliterator implements TransliterationProvider {
 function emptyStats(): SarvamRunStats {
   return {
     batches: 0, requests: 0, retries: 0, fallbackBatches: 0,
-    tokensViaApi: 0, tokensViaFallback: 0, tokensPreserved: 0,
-    largestInputChars: 0, notes: [],
+    tokensViaApi: 0, tokensViaFallback: 0, tokensViaNative: 0, nativeBatches: [],
+    tokensPreserved: 0, largestInputChars: 0, notes: [],
   };
 }
 
@@ -494,10 +565,12 @@ export class HttpTransliterator implements TransliterationProvider {
 // Selection
 // ---------------------------------------------------------------------------
 
-export type TransliteratorName = 'local' | 'sarvam' | 'http';
+export type { TransliteratorName } from './capabilities.js';
+import type { TransliteratorName } from './capabilities.js';
 
-export function listTransliterators(): TransliteratorName[] {
-  return ['local', 'sarvam', 'http'];
+/** Names accepted by --transliterate. 'native' is deliberately absent. */
+export function listTransliterators(): string[] {
+  return ['auto', 'local', 'sarvam', 'http'];
 }
 
 /**
@@ -524,8 +597,27 @@ export function resolveTransliterator(
   name: string | undefined,
   language: string,
   env: NodeJS.ProcessEnv = process.env,
+  opts: { allowNativeFallback?: boolean } = {},
 ): TransliterationProvider {
-  const chosen = (name ?? env.TRANSLITERATE_PROVIDER ?? autoSelectTransliterator(env)) as TransliteratorName;
+  const requested = name ?? env.TRANSLITERATE_PROVIDER ?? 'auto';
+
+  // 'native' is not a transliterator. Accepting it here would let a user ask
+  // for Roman output and get their own text back, which is precisely the
+  // failure mode the module exists to prevent. It is reachable only through
+  // --roman-fallback, where it is reported.
+  if (requested === 'native') {
+    throw new CaptionEngineError(
+      '"native" is not a transliteration backend — it performs no transliteration.',
+      'To keep the original script:\n' +
+        '  • drop --script roman, or\n' +
+        '  • use --roman-fallback native, which keeps native script ONLY when\n' +
+        '    romanisation is genuinely unavailable, and reports it.',
+    );
+  }
+
+  const chosen = (requested === 'auto'
+    ? autoSelectTransliterator(env)
+    : requested) as 'local' | 'sarvam' | 'http';
 
   switch (chosen) {
     case 'local': {
@@ -565,6 +657,10 @@ export function resolveTransliterator(
         maxChars: positiveInt(env.SARVAM_MAX_INPUT_CHARS),
         concurrency: positiveInt(env.SARVAM_CONCURRENCY),
         maxAttempts: positiveInt(env.SARVAM_MAX_ATTEMPTS),
+        // Set by --roman-fallback native. Lets a single failed batch keep its
+        // original script instead of failing a whole render, for the languages
+        // Sarvam alone serves (kn, te, ta, ml, bn, gu, pa, or, as).
+        allowNativeFallback: opts.allowNativeFallback ?? false,
       });
     }
 
