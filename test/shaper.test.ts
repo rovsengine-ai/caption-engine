@@ -7,7 +7,7 @@ import {
   scriptOf, splitScriptRuns, primaryScript, containsComplexScript,
   scriptForLanguage, isComplexScript,
 } from '../src/text/script.js';
-import { resolveFont, fontReport } from '../src/text/fonts.js';
+import { resolveFont, fontReport, discoverFontFamilies, listFontFamilies } from '../src/text/fonts.js';
 
 before(async () => { await initShaper(); });
 
@@ -72,6 +72,25 @@ describe('script detection', () => {
 });
 
 describe('font resolution', () => {
+  test('discovers named regular/bold font families from bundled assets', () => {
+    const families = discoverFontFamilies();
+    const devanagari = families.find((f) => f.name === 'Noto Sans Devanagari');
+    assert.ok(devanagari, 'bundled Devanagari family should be discoverable');
+    assert.ok(devanagari!.regular?.endsWith('.ttf'));
+    assert.ok(devanagari!.bold?.endsWith('.ttf'));
+    assert.ok(devanagari!.scripts.includes('Devanagari'));
+    assert.ok(listFontFamilies().includes('Noto Sans'));
+  });
+
+  test('selects a named family and clearly rejects a missing one', () => {
+    const r = resolveFont('Devanagari', { family: 'Noto Sans Devanagari', bold: true });
+    assert.match(r.path, /NotoSansDevanagari_700Bold\.ttf$/);
+    assert.throws(
+      () => resolveFont('Latin', { family: 'does not exist' }),
+      /Available fonts:/,
+    );
+  });
+
   test('every supported script resolves to a font file', () => {
     const rep = fontReport();
     const missing = rep.filter((r) => !r.ok);
@@ -161,6 +180,13 @@ describe('HarfBuzz shaping correctness', () => {
     for (const r of s.runs) {
       assert.equal(r.glyphs.filter((g) => g.glyphId === 0).length, 0, `tofu in ${r.script} run`);
     }
+  });
+
+  test('a named face falls back only for a script it does not cover, never to tofu', async () => {
+    const s = await shapeText('important बात', 80, { fontFamily: 'Noto Sans Devanagari' });
+    assert.equal(s.runs.flatMap((r) => r.glyphs).filter((g) => g.glyphId === 0).length, 0);
+    assert.ok(s.runs.some((r) => r.script === 'Latin' && /NotoSans_/.test(r.font.path)));
+    assert.ok(s.runs.some((r) => r.script === 'Devanagari' && /NotoSansDevanagari_/.test(r.font.path)));
   });
 
   test('produces drawable SVG path data', async () => {

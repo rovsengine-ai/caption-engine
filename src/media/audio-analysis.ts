@@ -71,6 +71,16 @@ export interface EnergyWindow {
   db: number;
 }
 
+export interface AudioAnalysisSnapshot {
+  silences: SilenceRange[];
+  volume: VolumeStats;
+  noiseDb: number;
+  windows: EnergyWindow[];
+  windowSec: number;
+  duration: number;
+  unavailableReason?: string;
+}
+
 export interface AudioAnalysisOptions {
   /** Silence threshold in dBFS. When omitted it is derived from the file itself. */
   noiseDb?: number;
@@ -241,6 +251,23 @@ export class AudioAnalysis {
   /** True when nothing was measured — callers must not treat absence as silence. */
   get available(): boolean {
     return !this.unavailableReason && this.windows.length > 0;
+  }
+
+  /** Serializable local measurement cache; contains no media bytes or secrets. */
+  snapshot(): AudioAnalysisSnapshot {
+    return {
+      silences: this.silences,
+      volume: this.volume,
+      noiseDb: this.noiseDb,
+      windows: this.windows,
+      windowSec: this.windowSec,
+      duration: this.duration,
+      unavailableReason: this.unavailableReason,
+    };
+  }
+
+  static fromSnapshot(snapshot: AudioAnalysisSnapshot): AudioAnalysis {
+    return new AudioAnalysis(snapshot);
   }
 
   /** Mean RMS dB across [start, end). -91 when unmeasured. */

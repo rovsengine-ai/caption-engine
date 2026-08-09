@@ -14,6 +14,10 @@ export interface CliOptions {
   aspect: AspectPreset;
   highlight: 'active-word' | 'none';
   activeScale: number;
+  activeColor?: string;
+  activeBold: boolean;
+  /** A discovered font family name from assets/fonts or FONT_DIR. */
+  font?: string;
   script: 'native' | 'roman';
   autoTrim: boolean;
   trimSilence: number;
@@ -110,6 +114,9 @@ APPEARANCE
       --aspect <name>       portrait | landscape | square | original  (default: portrait)
       --highlight <mode>    active-word | none                   (default: active-word)
       --active-scale <n>    Scale of the highlighted word        (default: 1.08)
+      --active-color <hex>  Active-word colour, e.g. #FFD400
+      --active-bold         Use the real bold face for the active word
+      --font <name>         Font family from assets/fonts or FONT_DIR
       --font-size <px>      Override caption size
       --position-y <0..1>   Vertical anchor, 0 = top, 1 = bottom (default: 0.72)
       --max-words <n>       Max words shown at once
@@ -319,6 +326,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
     aspect: 'portrait',
     highlight: 'active-word',
     activeScale: 1.08,
+    activeBold: false,
     script: 'native',
     autoTrim: false,
     trimSilence: 0.7,
@@ -387,6 +395,15 @@ export function parseArgs(argv: string[]): ParsedCommand {
         o.script = v; i++; break;
       }
       case '--active-scale': o.activeScale = num(a, next, 1, 2); i++; break;
+      case '--active-color': {
+        const value = needValue(a, next);
+        if (!/^#?(?:[\da-f]{3}|[\da-f]{6})$/i.test(value)) {
+          throw new CaptionEngineError('--active-color must be a 3- or 6-digit hex colour.');
+        }
+        o.activeColor = value.startsWith('#') ? value : `#${value}`; i++; break;
+      }
+      case '--active-bold': o.activeBold = true; break;
+      case '--font': o.font = needValue(a, next); i++; break;
       case '--font-size': o.fontSize = num(a, next, 8, 400); i++; break;
       case '--position-y': o.positionY = num(a, next, 0, 1); i++; break;
       case '--max-words': o.maxWordsPerCue = num(a, next, 1, 20); i++; break;

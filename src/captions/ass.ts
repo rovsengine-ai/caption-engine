@@ -1,5 +1,6 @@
 import type { CaptionCue, CaptionStyle, VideoMeta, Word } from '../types.js';
 import { DEFAULT_STYLE } from './group.js';
+import { activeWordWindows } from './active.js';
 
 /**
  * ASS (Advanced SubStation Alpha) generation with per-word active highlighting.
@@ -44,6 +45,8 @@ export interface AssOptions {
   highlight: HighlightMode;
   /** Scale the active word, e.g. 1.15 for a subtle pop. 1 = no scaling. */
   activeScale: number;
+  /** Render only the active word with a real bold face when supported. */
+  activeBold: boolean;
   maxLines: number;
   /** @deprecated use `highlight`. Kept so existing callers don't break. */
   activeWordHighlight?: boolean;
@@ -69,7 +72,7 @@ export function buildAss(cues: CaptionCue[], opts: Partial<AssOptions> = {}): st
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, ' +
       'BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, ' +
       'BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    styleLine(style, video, highlight),
+    styleLine(style, video, highlight, opts.activeBold ?? false),
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -79,7 +82,7 @@ export function buildAss(cues: CaptionCue[], opts: Partial<AssOptions> = {}): st
   const events = cues.flatMap((cue) => {
     switch (highlight) {
       case 'active-word':
-        return activeWordLines(cue, style, maxLines, activeScale);
+        return activeWordLines(cue, style, maxLines, activeScale, opts.activeBold ?? false);
       case 'karaoke':
         return [karaokeLine(cue, style, maxLines)];
       default:
@@ -94,6 +97,7 @@ function styleLine(
   style: CaptionStyle,
   video: Pick<VideoMeta, 'height'>,
   highlight: HighlightMode,
+  activeBold: boolean,
 ): string {
   // The colour roles DEPEND ON THE MODE — this is the subtle part.
   //
@@ -121,7 +125,7 @@ function styleLine(
     secondary,
     outline,
     '&H00000000', // back colour (unused with BorderStyle 1)
-    '-1', // bold
+    activeBold ? '0' : '-1', // preserve historical bold unless active-only bold was requested
     '0', // italic
     '0', // underline
     '0', // strikeout
@@ -158,17 +162,14 @@ function activeWordLines(
   style: CaptionStyle,
   maxLines: number,
   activeScale: number,
+  activeBold: boolean,
 ): string[] {
   const lines = layoutLines(cue.words, style.maxCharsPerLine, maxLines);
   const active = toAssColour(style.activeColor);
   const out: string[] = [];
 
-  cue.words.forEach((target, wi) => {
-    // Clamp to the cue so a trailing word can't extend past its own cue and
-    // collide with the next one.
-    const start = Math.max(target.start, cue.start);
-    const end = Math.min(Math.max(target.end, start + 0.01), cue.end);
-    if (end <= start) return;
+  for (const window of activeWordWindows(cue)) {
+    const wi = window.index;
 
     let idx = 0;
     const body = lines
@@ -182,17 +183,18 @@ function activeWordLines(
               activeScale !== 1
                 ? `\\fscx${Math.round(activeScale * 100)}\\fscy${Math.round(activeScale * 100)}`
                 : '';
+            const bold = activeBold ? '\\b1' : '';
             // Reset colour and scale after the word so the rest of the line is
             // unaffected — omitting the reset bleeds the highlight across the cue.
-            const reset = activeScale !== 1 ? '\\fscx100\\fscy100' : '';
-            return `{\\c${active}${scale}}${label}{\\c${toAssColour(style.primaryColor)}${reset}}`;
+            const reset = (activeScale !== 1 ? '\\fscx100\\fscy100' : '') + (activeBold ? '\\b0' : '');
+            return `{\\c${active}${scale}${bold}}${label}{\\c${toAssColour(style.primaryColor)}${reset}}`;
           })
           .join(' '),
       )
       .join('\\N');
 
-    out.push(dialogue(start, end, body));
-  });
+    out.push(dialogue(window.start, window.end, body));
+  }
 
   // Cover any gap before the first word / after the last with a plain line, so
   // the caption doesn't blink out between words.

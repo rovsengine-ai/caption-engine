@@ -1,5 +1,5 @@
 import opentype from 'opentype.js';
-import { resolveFont, fontDataFor, type ResolvedFont } from './fonts.js';
+import { resolveFont, fontDataFor, discoverFontFamilies, type ResolvedFont } from './fonts.js';
 import { splitScriptRuns, isRtlScript, type ScriptName } from './script.js';
 import { ShapingError } from '../errors.js';
 
@@ -124,41 +124,67 @@ async function shapeRun(
   text: string,
   script: ScriptName,
   fontSize: number,
-  opts: { bold?: boolean; fontPath?: string },
+  opts: { bold?: boolean; fontPath?: string; fontFamily?: string },
 ): Promise<ShapedRun> {
   const H = await hb();
-  const font = resolveFont(script, { bold: opts.bold, override: opts.fontPath });
-  const handles = await loadFont(font);
-
-  const buf = new (H as any).Buffer();
-  buf.addText(text);
-  buf.guessSegmentProperties();
-  (H as any).shape(handles.hbFont, buf);
-
-  const infos = buf.getGlyphInfos();
-  const positions = buf.getGlyphPositions();
-
-  const glyphs: ShapedGlyph[] = [];
-  let penX = 0;
-  let penY = 0;
-  for (let i = 0; i < infos.length; i++) {
-    const info = infos[i];
-    const pos = positions[i];
-    glyphs.push({
-      glyphId: info.codepoint,
-      x: penX + (pos.xOffset ?? 0),
-      y: penY + (pos.yOffset ?? 0),
-      xAdvance: pos.xAdvance ?? 0,
-      cluster: info.cluster ?? 0,
-    });
-    penX += pos.xAdvance ?? 0;
-    penY += pos.yAdvance ?? 0;
+  const primary = resolveFont(script, {
+    bold: opts.bold, override: opts.fontPath, family: opts.fontFamily,
+  });
+  const selected = discoverFontFamilies().find((f) => f.regular === primary.path || f.bold === primary.path);
+  const candidates: ResolvedFont[] = [primary];
+  // Shape the full script run with a fallback candidate, never individual
+  // codepoints: splitting a conjunct or Arabic joining run would corrupt it.
+  // We only try this after the selected face produced .notdef.
+  for (const family of selected?.fallbackCandidates ?? []) {
+    try {
+      const fallback = resolveFont(script, { bold: opts.bold, family });
+      if (!candidates.some((x) => x.path === fallback.path)) candidates.push(fallback);
+    } catch { /* a candidate may not carry this script's requested weight */ }
+  }
+  if (!opts.fontFamily && !opts.fontPath) {
+    // The default resolver can itself select a system face. Include the named
+    // registry as a final safety net rather than ever emitting glyph ID 0.
+    for (const family of discoverFontFamilies().filter((f) => f.scripts.includes(script))) {
+      try {
+        const fallback = resolveFont(script, { bold: opts.bold, family: family.name });
+        if (!candidates.some((x) => x.path === fallback.path)) candidates.push(fallback);
+      } catch { /* skip incomplete family */ }
+    }
   }
 
-  // Free the WASM-side buffer; leaking these across a long render is a real leak.
-  if (typeof buf.destroy === 'function') buf.destroy();
-
-  return { glyphs, script, font, handles, width: penX };
+  for (const font of candidates) {
+    const handles = await loadFont(font);
+    const buf = new (H as any).Buffer();
+    buf.addText(text);
+    buf.guessSegmentProperties();
+    (H as any).shape(handles.hbFont, buf);
+    const infos = buf.getGlyphInfos();
+    const positions = buf.getGlyphPositions();
+    const glyphs: ShapedGlyph[] = [];
+    let penX = 0;
+    let penY = 0;
+    for (let i = 0; i < infos.length; i++) {
+      const info = infos[i];
+      const pos = positions[i];
+      glyphs.push({
+        glyphId: info.codepoint,
+        x: penX + (pos.xOffset ?? 0),
+        y: penY + (pos.yOffset ?? 0),
+        xAdvance: pos.xAdvance ?? 0,
+        cluster: info.cluster ?? 0,
+      });
+      penX += pos.xAdvance ?? 0;
+      penY += pos.yAdvance ?? 0;
+    }
+    if (typeof buf.destroy === 'function') buf.destroy();
+    if (!glyphs.some((g) => g.glyphId === 0)) {
+      return { glyphs, script, font, handles, width: penX };
+    }
+  }
+  throw new ShapingError(
+    `No discovered font can render this ${script} text without missing glyphs.`,
+    `Add a .ttf or .otf with ${script} coverage to assets/fonts or FONT_DIR.`,
+  );
 }
 
 /**
@@ -168,7 +194,7 @@ async function shapeRun(
 export async function shapeText(
   text: string,
   fontSize: number,
-  opts: { bold?: boolean; fontPath?: string } = {},
+  opts: { bold?: boolean; fontPath?: string; fontFamily?: string } = {},
 ): Promise<ShapedText> {
   const runs = splitScriptRuns(text);
   if (runs.length === 0) {
@@ -289,7 +315,7 @@ export function shapedToSvgPath(shaped: ShapedText): string {
 export async function measureText(
   text: string,
   fontSize: number,
-  opts: { bold?: boolean; fontPath?: string } = {},
+  opts: { bold?: boolean; fontPath?: string; fontFamily?: string } = {},
 ): Promise<number> {
   const s = await shapeText(text, fontSize, opts);
   return s.width;

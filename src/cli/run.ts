@@ -21,6 +21,7 @@ import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
 import { resolveStyle, resolveOutput } from '../captions/style.js';
 import { renderVideo } from '../render/pipeline.js';
 import { initShaper } from '../text/shaper.js';
+import { listFontFamilies } from '../text/fonts.js';
 import { getLanguage } from '../config/languages.js';
 import {
   fingerprintInput,
@@ -888,10 +889,18 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   // ---- Subtitle exports --------------------------------------------------
   const { width, height } = resolveOutput(opts.aspect, info);
   const style = resolveStyle(opts.style, height, {
+    ...(opts.font !== undefined ? { fontFamily: opts.font } : {}),
+    ...(opts.activeColor !== undefined ? { activeColor: opts.activeColor } : {}),
     ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
     ...(opts.positionY !== undefined ? { positionY: opts.positionY } : {}),
     ...(opts.maxWordsPerCue !== undefined ? { maxWordsPerCue: opts.maxWordsPerCue } : {}),
   });
+  if (opts.font && !listFontFamilies().some((name) => name.toLocaleLowerCase() === opts.font!.toLocaleLowerCase())) {
+    throw new CaptionEngineError(
+      `Font family "${opts.font}" was not found.`,
+      `Available fonts: ${listFontFamilies().join(', ') || '(none)'}`,
+    );
+  }
 
   if (wantSrt) {
     const p = opts.format === 'srt' && opts.output ? outBase : `${stem}.srt`;
@@ -907,6 +916,8 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         video: { width, height },
         style,
         highlight: opts.highlight === 'none' ? 'none' : 'active-word',
+        activeScale: opts.activeScale,
+        activeBold: opts.activeBold,
       }),
       'utf8',
     );
@@ -993,6 +1004,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     const svgOpts = {
       width, height, style,
       activeScale: opts.activeScale,
+      activeBold: opts.activeBold,
       highlight: opts.highlight,
     };
     const plans = planCaptionFrames(cues, { width, height, highlight: opts.highlight });

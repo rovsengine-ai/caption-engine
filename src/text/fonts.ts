@@ -139,6 +139,96 @@ function allFontFiles(): string[] {
   return files;
 }
 
+/** A discovered family, suitable for a user-facing `--font` selector. */
+export interface FontFamily {
+  /** Stable display name, derived from the face filename. */
+  name: string;
+  /** Regular face when the family provides one. */
+  regular?: string;
+  /** Real bold face when the family provides one. */
+  bold?: string;
+  /** Scripts inferred from the face name; unknown custom faces are Latin-only. */
+  scripts: ScriptName[];
+  /** Other discovered families the renderer may use for a missing glyph. */
+  fallbackCandidates: string[];
+  source: 'vendored' | 'system' | 'fontconfig';
+}
+
+function faceName(path: string): string {
+  return fontBasename(path)
+    .replace(/\.(ttf|otf)$/i, '')
+    .replace(/(?:[_ -]?(?:400)?regular|[_ -]?book|[_ -]?roman|[_ -]?700bold|[_ -]?bold)$/i, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferredScripts(path: string): ScriptName[] {
+  const stem = normStem(path);
+  const match = (needle: string) => stem.includes(needle);
+  if (match('devanagari')) return ['Devanagari'];
+  if (match('telugu')) return ['Telugu'];
+  if (match('kannada')) return ['Kannada'];
+  if (match('tamil')) return ['Tamil'];
+  if (match('malayalam')) return ['Malayalam'];
+  if (match('bengali')) return ['Bengali'];
+  if (match('gujarati')) return ['Gujarati'];
+  if (match('gurmukhi')) return ['Gurmukhi'];
+  if (match('oriya') || match('odia')) return ['Oriya'];
+  if (match('nastaliq') || match('arabic') || match('urdu')) return ['Arabic'];
+  return ['Latin'];
+}
+
+function isBoldFace(path: string): boolean {
+  return /(?:^|[_ -])(?:[56789]00)?bold(?:$|[_ -])/i.test(fontBasename(path)) ||
+    /700bold/i.test(fontBasename(path));
+}
+
+/**
+ * Discover usable TTF/OTF families. This is deliberately data-driven: placing
+ * a face in assets/fonts (or FONT_DIR) makes it visible without a code change.
+ */
+export function discoverFontFamilies(): FontFamily[] {
+  const vendored = assetFontDir();
+  const grouped = new Map<string, { name: string; regular?: string; bold?: string; scripts: Set<ScriptName>; source: FontFamily['source'] }>();
+  for (const path of allFontFiles().filter((p) => /\.(ttf|otf)$/i.test(p))) {
+    const name = faceName(path) || fontBasename(path);
+    const key = name.toLocaleLowerCase();
+    const source: FontFamily['source'] = isInside(path, vendored) ? 'vendored' : 'system';
+    const entry = grouped.get(key) ?? { name, scripts: new Set<ScriptName>(), source };
+    if (isBoldFace(path)) entry.bold ??= path;
+    else entry.regular ??= path;
+    for (const script of inferredScripts(path)) entry.scripts.add(script);
+    // Prefer vendored when duplicate face names exist in a system font store.
+    if (source === 'vendored') entry.source = source;
+    grouped.set(key, entry);
+  }
+  const out: FontFamily[] = [...grouped.values()].map((entry) => ({
+    name: entry.name,
+    regular: entry.regular,
+    bold: entry.bold,
+    scripts: [...entry.scripts],
+    fallbackCandidates: [],
+    source: entry.source,
+  }));
+  for (const family of out) {
+    family.fallbackCandidates = out
+      .filter((other) => other.name !== family.name && other.scripts.some((s) => family.scripts.includes(s)))
+      .map((other) => other.name);
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function listFontFamilies(): string[] {
+  return discoverFontFamilies().map((f) => f.name);
+}
+
+function findFamily(name: string): FontFamily | undefined {
+  const wanted = name.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  return discoverFontFamilies().find((f) => f.name.toLocaleLowerCase() === wanted);
+}
+
 /**
  * Basename of a font path. Splits on BOTH separators rather than using
  * path.basename(), because a `C:\fonts\Noto.ttf` string must resolve the same
@@ -214,10 +304,10 @@ const resolveCache = new Map<string, ResolvedFont>();
  */
 export function resolveFont(
   script: ScriptName,
-  opts: { bold?: boolean; override?: string } = {},
+  opts: { bold?: boolean; override?: string; family?: string } = {},
 ): ResolvedFont {
   const bold = opts.bold ?? false;
-  const key = `${script}:${bold}:${opts.override ?? ''}`;
+  const key = `${script}:${bold}:${opts.override ?? ''}:${opts.family ?? ''}`;
   const cached = resolveCache.get(key);
   if (cached) return cached;
 
@@ -232,6 +322,34 @@ export function resolveFont(
     const r: ResolvedFont = { path: opts.override, script, bold, source: 'system' };
     resolveCache.set(key, r);
     return r;
+  }
+
+  if (opts.family) {
+    const family = findFamily(opts.family);
+    if (!family) {
+      const available = listFontFamilies();
+      throw new MissingFontError(
+        `Font family "${opts.family}" was not found. Available fonts: ${available.join(', ') || '(none)'}`,
+        script,
+        available,
+      );
+    }
+    // A named selection is a preference, not a licence to render tofu. For a
+    // script it declares, select its real requested weight. A script it does
+    // not cover proceeds through the normal script fallback below.
+    if (family.scripts.includes(script)) {
+      const path = (bold ? family.bold ?? family.regular : family.regular ?? family.bold);
+      if (path) {
+        const r: ResolvedFont = {
+          path,
+          script,
+          bold,
+          source: family.source,
+        };
+        resolveCache.set(key, r);
+        return r;
+      }
+    }
   }
 
   let stems = SCRIPT_FONTS[script] ?? SCRIPT_FONTS.Latin;

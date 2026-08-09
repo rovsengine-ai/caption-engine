@@ -248,6 +248,14 @@ describe('ASS document', () => {
     assert.match(scaled, /\\fscx100\\fscy100/, 'scale must be reset after the word');
   });
 
+  test('activeBold uses and resets ASS bold tags around only the active word', () => {
+    const activeOnly = buildAss(cues, { highlight: 'active-word', activeBold: true });
+    assert.match(activeOnly, /\\b1/);
+    assert.match(activeOnly, /\\b0/);
+    const styleRow = activeOnly.split('\n').find((l) => l.startsWith('Style: Default'))!;
+    assert.equal(styleRow.split(',')[7], '0', 'resting ASS style must be regular');
+  });
+
   test('preserves English words inside Hindi audio', () => {
     assert.match(ass, /important/, 'code-switched English must survive to the caption');
   });

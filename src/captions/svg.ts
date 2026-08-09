@@ -1,6 +1,7 @@
 import type { CaptionCue, CaptionStyle, Word } from '../types.js';
 import { shapeText, shapedToSvgRuns, type ShapedText } from '../text/shaper.js';
 import { primaryScript, isRtlScript } from '../text/script.js';
+import { activeWordWindows, resolveWordStyle } from './active.js';
 
 /**
  * Caption rendering as SVG, using pre-shaped vector outlines.
@@ -26,6 +27,8 @@ export interface SvgRenderOptions {
   activeWordIndex?: number;
   /** Scale applied to the active word. 1 = none. */
   activeScale?: number;
+  /** Use the real bold face only for the active word. */
+  activeBold?: boolean;
   maxLines?: number;
   /** Emit a transparent background (for overlay) or opaque (for previews). */
   background?: string;
@@ -37,6 +40,8 @@ interface LaidOutWord {
   shaped: ShapedText;
   x: number;
   width: number;
+  /** Reserved width across resting and active states; keeps every frame stable. */
+  reservedWidth: number;
 }
 
 interface LaidOutLine {
@@ -87,7 +92,7 @@ export async function layoutCue(
   opts: SvgRenderOptions,
 ): Promise<LaidOutLine[]> {
   const { style, width, maxLines = 2 } = opts;
-  const bold = true;
+  const bold = !opts.activeBold;
   const fontSize = style.fontSizePx;
   const maxWidth = width * 0.86; // side margins
   const baseSp = await spaceWidth(fontSize, bold);
@@ -96,23 +101,29 @@ export async function layoutCue(
   for (let i = 0; i < cue.words.length; i++) {
     const w = cue.words[i]!;
     const text = style.uppercase ? w.text.toUpperCase() : w.text;
-    const shaped = await shapeText(text, fontSize, { bold });
-    shapedWords.push({ word: w, index: i, shaped, x: 0, width: shaped.width });
+    const resting = resolveWordStyle(style, false, opts);
+    const active = resolveWordStyle(style, true, opts);
+    const shaped = await shapeText(text, fontSize, {
+      bold: resting.bold, fontFamily: resting.fontFamily,
+    });
+    const activeWidth = await measureForActive(text, fontSize, active);
+    const reservedWidth = Math.max(shaped.width, activeWidth);
+    shapedWords.push({ word: w, index: i, shaped, x: 0, width: shaped.width, reservedWidth });
   }
 
   const sp =
-    baseSp + activeScaleHeadroom(shapedWords.map((w) => w.width), opts.activeScale ?? 1);
+    baseSp + activeScaleHeadroom(shapedWords.map((w) => w.reservedWidth), 1);
 
   const lines: LaidOutLine[] = [];
   let cur: LaidOutWord[] = [];
   let curW = 0;
 
   for (const sw of shapedWords) {
-    const add = (cur.length ? sp : 0) + sw.width;
+    const add = (cur.length ? sp : 0) + sw.reservedWidth;
     if (curW + add > maxWidth && cur.length > 0) {
       lines.push({ words: cur, width: curW, y: 0 });
       cur = [sw];
-      curW = sw.width;
+      curW = sw.reservedWidth;
     } else {
       cur.push(sw);
       curW += add;
@@ -126,7 +137,7 @@ export async function layoutCue(
     const head = lines.slice(0, maxLines - 1);
     const rest = lines.slice(maxLines - 1);
     const merged: LaidOutWord[] = rest.flatMap((l) => l.words);
-    const mergedW = merged.reduce((n, w, i) => n + w.width + (i ? sp : 0), 0);
+    const mergedW = merged.reduce((n, w, i) => n + w.reservedWidth + (i ? sp : 0), 0);
     head.push({ words: merged, width: mergedW, y: 0 });
     lines.length = 0;
     lines.push(...head);
@@ -145,7 +156,7 @@ export async function layoutCue(
     const ordered = rtl ? [...line.words].reverse() : line.words;
     for (const w of ordered) {
       w.x = x;
-      x += w.width + sp;
+      x += w.reservedWidth + sp;
     }
   });
 
@@ -178,20 +189,25 @@ export async function renderCueSvg(
 
   for (const line of lines) {
     for (const lw of line.words) {
-      const runs = shapedToSvgRuns(lw.shaped);
-      if (runs.length === 0) continue;
-
       const isActive = lw.index === activeIdx;
-      const colour = isActive ? style.activeColor : style.primaryColor;
+      const finalStyle = resolveWordStyle(style, isActive, { activeScale, activeBold: opts.activeBold });
+      const text = style.uppercase ? lw.word.text.toUpperCase() : lw.word.text;
+      const shaped = finalStyle.bold === (!opts.activeBold)
+        ? lw.shaped
+        : await shapeText(text, style.fontSizePx, { bold: finalStyle.bold, fontFamily: finalStyle.fontFamily });
+      const runs = shapedToSvgRuns(shaped);
+      if (runs.length === 0) continue;
+      const colour = finalStyle.color;
 
       // Word-level placement. Scaling the active word happens about its own
       // centre so it grows in place rather than drifting right.
-      let wordTransform = `translate(${lw.x.toFixed(2)},${line.y.toFixed(2)})`;
-      if (isActive && activeScale !== 1) {
-        const cx = lw.width / 2;
+      const left = lw.x + (lw.reservedWidth - shaped.width) / 2;
+      let wordTransform = `translate(${left.toFixed(2)},${line.y.toFixed(2)})`;
+      if (isActive && finalStyle.scale !== 1) {
+        const cx = shaped.width / 2;
         wordTransform =
-          `translate(${(lw.x + cx).toFixed(2)},${line.y.toFixed(2)}) ` +
-          `scale(${activeScale}) translate(${(-cx).toFixed(2)},0)`;
+          `translate(${(left + cx).toFixed(2)},${line.y.toFixed(2)}) ` +
+          `scale(${finalStyle.scale}) translate(${(-cx).toFixed(2)},0)`;
       }
 
       for (const r of runs) {
@@ -285,15 +301,8 @@ export function planCaptionFrames(
       });
     }
 
-    for (let i = 0; i < cue.words.length; i++) {
-      const w = cue.words[i]!;
-      const next = cue.words[i + 1];
-      const start = Math.max(w.start, cue.start);
-      // Hold the highlight until the next word begins rather than dropping it
-      // during the gap — otherwise fast speech flickers.
-      const end = Math.min(next ? Math.max(next.start, w.end) : cue.end, cue.end);
-      if (end <= start) continue;
-      plans.push({ start, end, cueIndex: cue.index, activeWordIndex: i, ...dims });
+    for (const active of activeWordWindows(cue)) {
+      plans.push({ start: active.start, end: active.end, cueIndex: cue.index, activeWordIndex: active.index, ...dims });
     }
   }
 
@@ -302,6 +311,15 @@ export function planCaptionFrames(
     if (plans[i]!.end > plans[i + 1]!.start) plans[i]!.end = plans[i + 1]!.start;
   }
   return plans.filter((f) => f.end - f.start > 0.001);
+}
+
+async function measureForActive(
+  text: string,
+  fontSize: number,
+  active: ReturnType<typeof resolveWordStyle>,
+): Promise<number> {
+  const width = await shapeText(text, fontSize, { bold: active.bold, fontFamily: active.fontFamily });
+  return width.width * active.scale;
 }
 
 /** Generate the SVG for one planned frame, on demand. */
