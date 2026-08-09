@@ -25,6 +25,14 @@ export interface TrimOptions {
   falseStartRequiresPause: boolean;
   /** Minimum gap at the seam between the two runs to count as a break. */
   falseStartSeamPauseSec: number;
+  /**
+   * Suppress proposals below this confidence, 0..1. 0 proposes everything.
+   *
+   * A suppressed cut is not "restored" — it is never proposed at all, so it
+   * does not appear in the review list. Use `restored` to keep something the
+   * engine did propose.
+   */
+  minCutConfidence: number;
 }
 
 /**
@@ -47,7 +55,46 @@ export const DEFAULT_TRIM_OPTIONS: TrimOptions = {
   ambiguousPauseWindowSec: 0.35,
   falseStartRequiresPause: true,
   falseStartSeamPauseSec: 0.18,
+  // Propose everything by default. The review step is the safety net, and
+  // hiding a proposal is worse than showing one the user rejects in a click.
+  minCutConfidence: 0,
 };
+
+/**
+ * Build a Cut.
+ *
+ * The single construction point for cuts, so `category` cannot drift from
+ * `reason` and no detector can forget `confidence` or `sourceWords` — the
+ * compiler makes those a required argument rather than an easy omission.
+ */
+function mkCut(a: {
+  id: string;
+  start: number;
+  end: number;
+  reason: CutReason;
+  label: string;
+  wordIndices: number[];
+  sourceWords: string[];
+  confidence: number;
+}): Cut {
+  return {
+    id: a.id,
+    start: round3(a.start),
+    end: round3(a.end),
+    reason: a.reason,
+    category: a.reason,
+    label: a.label,
+    wordIndices: a.wordIndices,
+    sourceWords: a.sourceWords,
+    confidence: clamp01(a.confidence),
+    restored: false,
+  };
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(1, Math.max(0, Math.round(n * 1000) / 1000));
+}
 
 /**
  * Auto Trim: read the transcript, propose what a human editor would cut.
@@ -77,7 +124,10 @@ export function autoTrim(
   if (spoken.length > 0) {
     const first = spoken[0]!;
     if (first.w.start > opts.maxSilenceSec) {
-      cuts.push(mkSilenceCut(nextId('silence'), 0, first.w.start - opts.paddingSec, []));
+      cuts.push(mkSilenceCut(
+        nextId('silence'), 0, first.w.start - opts.paddingSec, [], [],
+        silenceConfidence(first.w.start, opts.maxSilenceSec),
+      ));
     }
 
     for (let k = 1; k < spoken.length; k++) {
@@ -91,7 +141,11 @@ export function autoTrim(
           // Any 'spacing' word entries inside the gap belong to this cut.
           const covered: number[] = [];
           for (let j = prev.i + 1; j < cur.i; j++) covered.push(j);
-          cuts.push(mkSilenceCut(nextId('silence'), start, end, covered));
+          cuts.push(mkSilenceCut(
+            nextId('silence'), start, end, covered,
+            covered.map((j) => words[j]!.text),
+            silenceConfidence(gap, opts.maxSilenceSec),
+          ));
         }
       }
     }
@@ -99,9 +153,10 @@ export function autoTrim(
     const last = spoken[spoken.length - 1]!;
     const tail = transcript.duration - last.w.end;
     if (tail > opts.maxSilenceSec) {
-      cuts.push(
-        mkSilenceCut(nextId('silence'), last.w.end + opts.paddingSec, transcript.duration, []),
-      );
+      cuts.push(mkSilenceCut(
+        nextId('silence'), last.w.end + opts.paddingSec, transcript.duration, [], [],
+        silenceConfidence(tail, opts.maxSilenceSec),
+      ));
     }
   }
 
@@ -113,12 +168,23 @@ export function autoTrim(
       const m = matchFiller(w.text, lang);
       if (!m.isFiller) continue;
 
+      // How much corroborating pause there is. Computed for every filler, not
+      // just ambiguous ones, because it is what the confidence score is built
+      // from — an "um" surrounded by a long pause is a surer cut than one
+      // delivered mid-flow.
+      const prevW = spoken[k - 1];
+      const nextW = spoken[k + 1];
+      const pauseEvidence = Math.max(
+        prevW ? w.start - prevW.w.end : 0,
+        nextW ? nextW.w.start - w.end : 0,
+      );
+
       // "matlab" / "ante" are real words too. Only cut them when a pause on either
       // side suggests hesitation rather than meaning. Without this guard you
       // silently destroy sentences, which is worse than leaving a filler in.
       if (m.ambiguous && opts.cutAmbiguousFillersOnlyNearPause) {
-        const prev = spoken[k - 1];
-        const next = spoken[k + 1];
+        const prev = prevW;
+        const next = nextW;
 
         // A MISSING neighbour is not a pause, and neither is clip-boundary air.
         //
@@ -139,15 +205,16 @@ export function autoTrim(
         if (!nearPause) continue;
       }
 
-      cuts.push({
+      cuts.push(mkCut({
         id: nextId('filler'),
         start: w.start,
         end: w.end,
         reason: 'filler',
         label: `filler: "${w.text}"`,
         wordIndices: [i],
-        restored: false,
-      });
+        sourceWords: [w.text],
+        confidence: fillerConfidence(m.ambiguous, pauseEvidence, opts.ambiguousPauseWindowSec),
+      }));
     }
   }
 
@@ -160,21 +227,31 @@ export function autoTrim(
   if (opts.removeLowConfidence) {
     for (const { w, i } of spoken) {
       if (w.confidence < opts.lowConfidenceThreshold) {
-        cuts.push({
+        cuts.push(mkCut({
           id: nextId('low_confidence'),
           start: w.start,
           end: w.end,
           reason: 'low_confidence',
           label: `unclear: "${w.text}" (${Math.round(w.confidence * 100)}%)`,
           wordIndices: [i],
-          restored: false,
-        });
+          sourceWords: [w.text],
+          // Our certainty that the cut is right is the ASR's uncertainty that
+          // the word is right — the one place the two invert cleanly.
+          confidence: 1 - w.confidence,
+        }));
       }
     }
   }
 
   cuts.sort((a, b) => a.start - b.start);
-  const merged = mergeOverlapping(cuts);
+  // Filter BEFORE merging. Merging takes the minimum confidence of its parts,
+  // so a suppressed low-confidence cut that had already been absorbed into a
+  // neighbour would drag that neighbour below the threshold too — suppressing
+  // a cut the user asked to keep.
+  const filtered = opts.minCutConfidence > 0
+    ? cuts.filter((c) => c.confidence >= opts.minCutConfidence)
+    : cuts;
+  const merged = mergeOverlapping(filtered);
   const removed = merged.reduce((n, c) => n + (c.end - c.start), 0);
 
   return {
@@ -185,16 +262,55 @@ export function autoTrim(
   };
 }
 
-function mkSilenceCut(id: string, start: number, end: number, wordIndices: number[]): Cut {
-  return {
+/**
+ * Confidence for a silence cut.
+ *
+ * Scales with how far past the threshold the gap runs: a gap exactly at the
+ * threshold is a judgement call, twice the threshold is unambiguous dead air.
+ * Capped at 0.99 — silence detection is the most reliable signal here, but
+ * nothing in this file earns a 1.0.
+ */
+function silenceConfidence(gapSec: number, thresholdSec: number): number {
+  if (thresholdSec <= 0) return 0.9;
+  return Math.min(0.99, 0.5 + 0.5 * ((gapSec - thresholdSec) / thresholdSec));
+}
+
+/**
+ * Confidence for a filler cut.
+ *
+ * The `always` tier is, by the rule in fillers.ts, restricted to tokens that
+ * are not words in the language — removing one cannot change meaning, so it
+ * scores high regardless of context. The `ambiguous` tier is a real word that
+ * happened to sit next to a pause; that is genuine but weaker evidence, so it
+ * starts low and rises with the length of the corroborating pause. It is
+ * deliberately capped below the `always` tier: no amount of pause makes
+ * deleting a real word as safe as deleting a grunt.
+ */
+function fillerConfidence(ambiguous: boolean, pauseSec: number, windowSec: number): number {
+  if (!ambiguous) return 0.95;
+  if (windowSec <= 0) return 0.6;
+  const overshoot = Math.min(1, (pauseSec - windowSec) / windowSec);
+  return Math.min(0.85, 0.55 + 0.3 * Math.max(0, overshoot));
+}
+
+function mkSilenceCut(
+  id: string,
+  start: number,
+  end: number,
+  wordIndices: number[],
+  sourceWords: string[],
+  confidence: number,
+): Cut {
+  return mkCut({
     id,
-    start: round3(start),
-    end: round3(end),
+    start,
+    end,
     reason: 'silence',
     label: `${(end - start).toFixed(1)}s silence`,
     wordIndices,
-    restored: false,
-  };
+    sourceWords,
+    confidence,
+  });
 }
 
 /**
@@ -214,6 +330,24 @@ function mkSilenceCut(id: string, start: number, end: number, wordIndices: numbe
  * must contain a real gap (`falseStartSeamPauseSec`). Without that check this
  * detector removes emphasis and calls it a correction.
  */
+/**
+ * Confidence for a false start.
+ *
+ * Two independent signals. A longer repeated run is far less likely to recur by
+ * chance — two identical words happens constantly, five in a row essentially
+ * never. And a longer break at the seam is stronger evidence the speaker
+ * actually stopped rather than repeated for effect. Capped at 0.9: this
+ * detector removes real, fluent speech when it is wrong, so it should never
+ * present itself as certain.
+ */
+function falseStartConfidence(runLength: number, seamGapSec: number, seamThresholdSec: number): number {
+  const lengthTerm = Math.min(0.4, (runLength - 1) * 0.12); // 2 words → 0.12, 5 → 0.4
+  const gapTerm = seamThresholdSec > 0
+    ? Math.min(0.35, 0.35 * (seamGapSec / (seamThresholdSec * 3)))
+    : 0;
+  return Math.min(0.9, 0.3 + lengthTerm + gapTerm);
+}
+
 function detectFalseStarts(
   spoken: Array<{ w: Word; i: number }>,
   nextId: (r: CutReason) => string,
@@ -244,41 +378,66 @@ function detectFalseStarts(
       const startWord = spoken[k]!;
       const endWord = spoken[k + n - 1]!;
       const indices: number[] = [];
+      const texts: string[] = [];
       for (let j = 0; j < n; j++) {
         indices.push(spoken[k + j]!.i);
+        texts.push(spoken[k + j]!.w.text);
         consumed.add(k + j);
       }
 
-      cuts.push({
+      const seamGap = spoken[k + n]!.w.start - spoken[k + n - 1]!.w.end;
+
+      cuts.push(mkCut({
         id: nextId('false_start'),
         start: startWord.w.start,
         end: endWord.w.end,
         reason: 'false_start',
         label: `repeated take: "${a.join(' ')}"`,
         wordIndices: indices,
-        restored: false,
-      });
+        sourceWords: texts,
+        confidence: falseStartConfidence(n, seamGap, opts.falseStartSeamPauseSec),
+      }));
     }
   }
   return cuts;
 }
 
-/** Overlapping cuts would double-count removed time and confuse the review UI. */
+/**
+ * Overlapping cuts would double-count removed time and confuse the review UI.
+ *
+ * A merged cut takes the **minimum** confidence of its parts. Merging enlarges
+ * what gets removed, so the combined proposal can only be as trustworthy as its
+ * weakest component — averaging would let a certain silence cut launder a
+ * doubtful filler cut into looking safe.
+ */
 function mergeOverlapping(cuts: Cut[]): Cut[] {
   if (cuts.length === 0) return [];
-  const out: Cut[] = [{ ...cuts[0]!, wordIndices: [...cuts[0]!.wordIndices] }];
+  const clone = (c: Cut): Cut => ({
+    ...c,
+    wordIndices: [...c.wordIndices],
+    sourceWords: [...c.sourceWords],
+  });
+  const out: Cut[] = [clone(cuts[0]!)];
 
   for (let k = 1; k < cuts.length; k++) {
     const cur = cuts[k]!;
     const last = out[out.length - 1]!;
     if (cur.start <= last.end) {
       last.end = Math.max(last.end, cur.end);
-      last.wordIndices = [...new Set([...last.wordIndices, ...cur.wordIndices])];
+      // Union by index, then re-derive the word list from the index order so
+      // sourceWords stays in transcript order rather than merge order.
+      const idx = [...new Set([...last.wordIndices, ...cur.wordIndices])].sort((a, b) => a - b);
+      const textByIndex = new Map<number, string>();
+      last.wordIndices.forEach((i, n) => textByIndex.set(i, last.sourceWords[n] ?? ''));
+      cur.wordIndices.forEach((i, n) => textByIndex.set(i, cur.sourceWords[n] ?? ''));
+      last.wordIndices = idx;
+      last.sourceWords = idx.map((i) => textByIndex.get(i) ?? '').filter(Boolean);
+      last.confidence = Math.min(last.confidence, cur.confidence);
       if (cur.reason !== last.reason) {
         last.label = `${last.label} + ${cur.label}`;
       }
     } else {
-      out.push({ ...cur, wordIndices: [...cur.wordIndices] });
+      out.push(clone(cur));
     }
   }
   return out;

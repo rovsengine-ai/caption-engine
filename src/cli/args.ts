@@ -18,6 +18,8 @@ export interface CliOptions {
   autoTrim: boolean;
   trimSilence: number;
   keepFillers: boolean;
+  /** Suppress Auto Trim proposals below this confidence, 0..1. */
+  minCutConfidence?: number;
   /** Seconds of audio kept on each side of a speech cut. */
   cutHandles?: number;
   /** Seconds of fade at each cut join. 0 disables. */
@@ -119,6 +121,13 @@ AUTO TRIM
       --auto-trim           Remove silences, fillers and false starts
       --trim-silence <sec>  Gap length treated as silence        (default: 0.7)
       --keep-fillers        Trim silence only, leave filler words in
+      --min-cut-confidence <0..1>
+                            Only propose cuts this confident              (default: 0)
+                            Every cut carries a deterministic confidence: silence
+                            scales with gap length, an unambiguous filler scores
+                            0.95, a real word cut on pause evidence caps at 0.85,
+                            a repeated take at 0.9. 0 proposes everything and lets
+                            the review step decide — raise it for an unattended run.
       --cut-handles <sec>   Audio kept on each side of a speech cut  (default: 0.04)
                             ASR word boundaries are estimates; cutting exactly on
                             them clips the final consonant. Applied to the cut list
@@ -328,6 +337,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--auto-trim': o.autoTrim = true; break;
       case '--trim-silence': o.trimSilence = num(a, next, 0.05, 30); i++; break;
       case '--keep-fillers': o.keepFillers = true; break;
+      case '--min-cut-confidence': o.minCutConfidence = num(a, next, 0, 1); i++; break;
       case '--cut-handles': o.cutHandles = num(a, next, 0, 1); i++; break;
       case '--cut-fade': o.cutFade = num(a, next, 0, 0.5); i++; break;
       case '--clips': o.clips = true; break;

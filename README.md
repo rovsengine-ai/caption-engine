@@ -436,7 +436,8 @@ Nothing is ever cut silently. The three-step flow:
 node dist/src/cli.js talk.mp4 --auto-trim --cuts-out cuts.json --format json -o t.json
 
 # 2. Review cuts.json — set "restored": true on anything you want to KEEP
-#    [{ "id": "filler-3", "reason": "filler", "label": "filler: \"matlab\"",
+#    [{ "id": "filler-3", "category": "filler", "confidence": 0.62,
+#       "sourceWords": ["matlab"], "label": "filler: \"matlab\"",
 #       "start": 4.2, "end": 4.7, "restored": false }, ...]
 
 # 3. Render with the review applied
@@ -451,14 +452,52 @@ node dist/src/cli.js talk.mp4 --transcript-in t.json --review-cuts --cuts-out cu
 ```
 
 Cuts are reported by category so you can sanity-check how much is silence versus how many
-real words were removed:
+real words were removed, then listed **least confident first** — with forty proposals, the
+handful worth arguing with are at the bottom of the confidence range, not the top of the
+timeline:
 
 ```
   5 cut(s) proposed, 0 restored, 5 active
      silence          3 cut(s)  4.6s
      filler           2 cut(s)  0.7s
      TOTAL            5 cut(s)  5.3s  (14.0s → 8.7s)
+  cuts, least confident first:
+  filler-3         4.20-4.70   62%  filler        “matlab”
+  filler-1         2.10-2.35   95%  filler        “um”
+  silence-0        0.00-1.80   99%  silence       (silence)
 ```
+
+#### Cut confidence
+
+Every cut carries `confidence` (0–1), `category` and `sourceWords` — the actual text it
+removes, so you do not have to open the transcript to see what a cut does. Confidence is
+**deterministic, not learned**:
+
+| Category | Score |
+|---|---|
+| silence | scales with gap length past the threshold, capped at 0.99 |
+| filler, non-word (`um`, `hmm`) | 0.95 |
+| filler, real word cut on pause evidence (`matlab`, `आ`) | 0.55–0.85, rising with pause length |
+| false start | 0.3–0.9, rising with run length and seam-gap length |
+| low confidence | `1 − word.confidence` |
+
+The real-word tier is capped **below** the non-word tier on purpose: no amount of pause
+makes deleting a real word as safe as deleting a grunt. Nothing scores 1.0.
+
+```bash
+--min-cut-confidence 0.9    # only propose cuts this confident (default: 0)
+```
+
+Default 0 proposes everything and lets review decide — hiding a proposal is worse than
+showing one you reject in a click. Raise it for an unattended run. A suppressed cut is
+never proposed at all, which is different from `restored`: that keeps something the engine
+*did* propose.
+
+Merged overlapping cuts take the **minimum** confidence of their parts, so a certain
+silence cut cannot launder a doubtful filler cut into looking safe.
+
+Older `cuts.json` files without these fields still load — a review only needs `id` and
+`restored`; everything else is recomputed.
 
 Source words are never deleted — cuts mark `keep: false` and are fully reversible.
 Restoring every cut reproduces the original duration exactly. Options:

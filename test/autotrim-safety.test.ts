@@ -151,6 +151,40 @@ describe('repeated words: retake vs emphasis', () => {
   });
 });
 
+describe('confidence exposes the risky cuts', () => {
+  test('a real-word cut always ranks below a non-word filler cut', () => {
+    // The audit cases: cutting "matlab" on pause evidence is a judgement call,
+    // cutting "um" is not, and the ordering must say so. Note this does NOT
+    // claim real-word cuts are the least confident overall — a silence gap
+    // sitting exactly on the threshold is genuinely marginal too, and scores
+    // accordingly. The claim is about the two filler tiers relative to each other.
+    const t = tx([
+      ['ye', 0.2, 0.5], ['ghar', 0.55, 0.9], ['matlab', 1.6, 1.9], ['accha', 1.95, 2.3],
+      ['um', 2.35, 2.6], ['hai', 3.6, 3.9],
+    ], 'hi', 5);
+    const fillers = autoTrim(t, { ...DEFAULT_TRIM_OPTIONS }).cuts
+      .filter((c) => c.reason === 'filler');
+
+    const matlab = fillers.find((c) => c.sourceWords.includes('matlab'))!;
+    const um = fillers.find((c) => c.sourceWords.includes('um'))!;
+    assert.ok(matlab && um, 'fixture no longer produces both filler tiers');
+    assert.ok(
+      matlab.confidence < um.confidence,
+      `real word "matlab" (${matlab.confidence}) must rank below "um" (${um.confidence})`,
+    );
+    assert.ok(matlab.confidence < 0.9, 'a real-word cut must never look near-certain');
+  });
+
+  test('suppressing sub-0.9 proposals leaves only non-word fillers and clear silence', () => {
+    const t = tx([
+      ['ye', 0.2, 0.5], ['matlab', 1.3, 1.6], ['um', 1.65, 1.9], ['hai', 1.95, 2.2],
+    ], 'hi');
+    const strict = autoTrim(t, { ...DEFAULT_TRIM_OPTIONS, minCutConfidence: 0.9 });
+    const removed = strict.cuts.flatMap((c) => c.sourceWords);
+    assert.ok(!removed.includes('matlab'), 'a real word survived a strict threshold');
+  });
+});
+
 describe('names and content words are never touched', () => {
   test('a proper name that resembles nothing in the lexicon survives', () => {
     const kept = survivors(tx(fluent(['Aarav', 'aur', 'Aashna', 'aaye']), 'hi'));

@@ -508,7 +508,11 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       maxSilenceSec: opts.trimSilence,
       removeFillers: !opts.keepFillers,
       removeFalseStarts: !opts.keepFillers,
+      minCutConfidence: opts.minCutConfidence ?? DEFAULT_TRIM_OPTIONS.minCutConfidence,
     });
+    if (opts.minCutConfidence) {
+      log.info(`--min-cut-confidence ${opts.minCutConfidence}: lower-confidence proposals suppressed`);
+    }
 
     let restored = 0;
     if (opts.cutsIn) {
@@ -582,11 +586,29 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         `(${transcript.duration.toFixed(1)}s → ${(transcript.duration - removed).toFixed(1)}s)`,
     );
 
+    // Least confident first. With forty proposals the reviewer's whole job is
+    // finding the handful worth arguing with, and those are at the bottom of
+    // the confidence range — not the top of the timeline.
     const listLimit = opts.reviewCuts ? active.length : 8;
-    for (const c of active.slice(0, listLimit)) {
-      log.info(`  ${c.id.padEnd(16)} ${c.start.toFixed(2)}-${c.end.toFixed(2)}  ${c.reason.padEnd(13)} ${c.label}`);
+    const byRisk = [...active].sort((a, b) => a.confidence - b.confidence);
+    if (active.length > 0) log.info('  cuts, least confident first:');
+    for (const c of byRisk.slice(0, listLimit)) {
+      const words = c.sourceWords.length ? `“${c.sourceWords.join(' ')}”` : '(silence)';
+      log.info(
+        `  ${c.id.padEnd(16)} ${c.start.toFixed(2)}-${c.end.toFixed(2)}  ` +
+          `${String(Math.round(c.confidence * 100)).padStart(3)}%  ` +
+          `${c.category.padEnd(13)} ${words}`,
+      );
     }
     if (active.length > listLimit) log.info(`  ... and ${active.length - listLimit} more`);
+
+    const shaky = active.filter((c) => c.confidence < 0.6);
+    if (shaky.length > 0 && !opts.reviewCuts) {
+      log.warn(
+        `${shaky.length} cut(s) below 60% confidence — review with --review-cuts, ` +
+          `or suppress with --min-cut-confidence 0.6`,
+      );
+    }
 
     if (opts.reviewCuts) {
       if (!opts.cutsOut) {

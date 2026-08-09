@@ -88,10 +88,33 @@ export interface Cut {
   start: number;
   end: number;
   reason: CutReason;
+  /**
+   * Alias of `reason`, always equal to it.
+   *
+   * Exists because "category" is what the field is called everywhere outside
+   * this codebase, and a reviewer editing cuts.json by hand should not have to
+   * learn our word for it. Kept in sync by construction — never set separately.
+   */
+  category: CutReason;
   /** What the user sees in the review list, e.g. "um, uh" or "2.4s silence". */
   label: string;
   /** Indices into Transcript.words that this cut covers. */
   wordIndices: number[];
+  /**
+   * The actual words this cut removes, in order.
+   *
+   * `wordIndices` alone forces a reviewer to open the transcript to see what a
+   * cut does. Empty for a pure-silence cut, which removes no words.
+   */
+  sourceWords: string[];
+  /**
+   * How sure the engine is that this cut is correct, 0..1.
+   *
+   * Deterministic, not learned — see `cutConfidence` in autotrim/index.ts for
+   * how each category derives it. A reviewer with forty proposals needs to know
+   * which five to look at, and sorting by this is that answer.
+   */
+  confidence: number;
   /** User can restore any cut. Restored cuts are skipped at render time. */
   restored: boolean;
 }

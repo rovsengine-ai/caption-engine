@@ -8,9 +8,11 @@ import { buildBaseArgs, DEFAULT_CUT_FADE_SEC } from '../src/render/pipeline.js';
 import type { Transcript, TrimResult, Cut } from '../src/types.js';
 
 function cut(over: Partial<Cut>): Cut {
+  const reason = over.reason ?? 'filler';
   return {
-    id: 'c1', start: 1.0, end: 2.0, reason: 'filler',
-    label: 'filler', wordIndices: [1], restored: false, ...over,
+    id: 'c1', start: 1.0, end: 2.0, reason, category: reason,
+    label: 'filler', wordIndices: [1], sourceWords: ['um'],
+    confidence: 0.9, restored: false, ...over,
   };
 }
 
