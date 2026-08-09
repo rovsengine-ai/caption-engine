@@ -2,7 +2,7 @@ import { CaptionEngineError } from '../errors.js';
 import { transliterateToken, hasDevanagari } from './devanagari.js';
 import { isIndicScript } from './script-utils.js';
 import {
-  planBatches, splitBatchResponse, mapWithConcurrency,
+  planBatches, splitBatchResponse, mapWithConcurrency, subdivide,
   DEFAULT_MAX_BATCH_CHARS, DEFAULT_SEPARATOR, SARVAM_HARD_LIMIT,
   type TokenBatch,
 } from './batching.js';
@@ -158,6 +158,16 @@ export interface SarvamOptions {
    * `--roman-fallback native`, and every affected batch is named in the report.
    */
   allowNativeFallback?: boolean;
+  /**
+   * Ceiling on the extra requests one batch may spend bisecting itself after a
+   * token-count mismatch (see `romaniseBatch`). Bounded because the recovery
+   * costs real money: a batch that keeps failing must not turn into an
+   * unbounded request storm.
+   *
+   * 0 disables subdivision entirely and restores the previous
+   * fail-the-whole-batch behaviour.
+   */
+  maxSubdivisionRequests?: number;
 }
 
 /** What happened on the last `romanise()` call. Surfaced by the CLI. */
@@ -174,6 +184,12 @@ export interface SarvamRunStats {
   nativeBatches: number[];
   tokensPreserved: number;
   largestInputChars: number;
+  /** Extra requests spent bisecting batches whose reply could not be aligned. */
+  subdivisionRequests: number;
+  /** 1-based batch numbers that had to be bisected. */
+  subdividedBatches: number[];
+  /** Words rescued by bisection that would previously have failed the run. */
+  tokensViaSubdivision: number;
   notes: string[];
 }
 
@@ -192,9 +208,20 @@ export interface SarvamRunStats {
  * ALIGNMENT. Sarvam romanises whole strings, not arrays, so a batch is joined
  * with a delimiter and split back out. Every returned piece is mapped to the
  * index of the word it came from. If a batch comes back with the wrong number
- * of pieces we retry once, then romanise that batch offline — we never pad or
- * truncate to make the counts line up, because that silently shifts every
- * subsequent caption.
+ * of pieces we retry once, then BISECT it and ask again for smaller pieces,
+ * down to one word per request — we never pad or truncate to make the counts
+ * line up, because that silently shifts every subsequent caption.
+ *
+ * Bisection is the part that turns a fatal mismatch into a correct caption.
+ * A ~60-word batch asks the model to preserve ~59 delimiters exactly; the more
+ * words in the request, the more chances it has to merge, drop or add one. Half
+ * a batch is a genuinely different request rather than a re-roll of the same
+ * one, and a single-word request carries no delimiter at all, so its reply
+ * cannot be mis-split. That makes the leaves of the recursion correct by
+ * construction rather than by luck.
+ *
+ * Only the words that still cannot be aligned after bisection reach the
+ * fallback policy, so one stubborn word no longer costs a whole batch.
  */
 export class SarvamTransliterator implements TransliterationProvider {
   readonly name = 'sarvam';
@@ -210,6 +237,7 @@ export class SarvamTransliterator implements TransliterationProvider {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly fallbackOverride: TransliterationProvider | null | undefined;
   private readonly allowNativeFallback: boolean;
+  private readonly maxSubdivisionRequests: number;
 
   /** Reset at the start of every romanise() call. */
   stats: SarvamRunStats = emptyStats();
@@ -228,6 +256,9 @@ export class SarvamTransliterator implements TransliterationProvider {
     this.sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.fallbackOverride = o.fallback;
     this.allowNativeFallback = o.allowNativeFallback ?? false;
+    // 48 is comfortably more than the ~2·log2(n) a single awkward word costs,
+    // and far less than the 2n-1 a batch that fails at every size would spend.
+    this.maxSubdivisionRequests = Math.max(0, o.maxSubdivisionRequests ?? 48);
   }
 
   supports(language: string): boolean {
@@ -267,20 +298,42 @@ export class SarvamTransliterator implements TransliterationProvider {
       // Unsendable on its own: straight to the fallback, no wasted request.
       if (batch.oversize) {
         return this.runFallback(
-          batch, language, fallback,
+          batch.tokens, language, fallback,
           `token of ${batch.input.length} chars exceeds the ${this.maxChars}-char request budget`,
           bi,
         );
       }
+      let attempted: Array<string | null>;
       try {
-        return await this.romaniseBatch(batch, language, bi);
+        attempted = await this.romaniseBatch(batch, language, bi);
       } catch (err) {
         // A bad key or a rejected schema affects every batch identically.
         // Degrading all of them to offline quality would look like success and
         // bury the actual problem, so this one propagates.
         if (isFatal(err)) throw err;
-        return this.runFallback(batch, language, fallback, describe(err), bi);
+        return this.runFallback(batch.tokens, language, fallback, describe(err), bi);
       }
+
+      const unresolved = attempted.filter((v) => v === null).length;
+      if (unresolved === 0) return attempted as string[];
+
+      // Bisection got most of the batch; only the words it could not align go
+      // to the policy. Rescued words keep their model-quality romanisation.
+      // The reason names what was actually attempted, so a run with bisection
+      // turned off does not claim to have tried it.
+      const bisected = this.stats.subdividedBatches.includes(bi + 1);
+      const rescue = await this.runFallback(
+        batch.tokens.filter((_, k) => attempted[k] === null),
+        language,
+        fallback,
+        `${unresolved} of ${batch.tokens.length} word(s) could not be aligned` +
+          (bisected
+            ? ', even after splitting the batch into smaller requests'
+            : ' (batch splitting is switched off)'),
+        bi,
+      );
+      let r = 0;
+      return attempted.map((v, k) => (v === null ? (rescue[r++] ?? batch.tokens[k]!) : v));
     });
 
     results.forEach((batchOut, bi) => {
@@ -302,11 +355,24 @@ export class SarvamTransliterator implements TransliterationProvider {
     return out;
   }
 
-  /** One batch: request, split, and one content retry before giving up. */
-  private async romaniseBatch(batch: TokenBatch, language: string, bi: number): Promise<string[]> {
+  /**
+   * One batch: request, split, one content retry, then bisect.
+   *
+   * Returns exactly `batch.tokens.length` entries, in order. Any word the model
+   * never produced an alignable answer for comes back as `null`, for the caller
+   * to hand to the fallback policy — so a single unresolvable word costs one
+   * word, not the batch it happened to be packed into.
+   */
+  private async romaniseBatch(
+    batch: TokenBatch,
+    language: string,
+    bi: number,
+  ): Promise<Array<string | null>> {
+    // Pass 1: the batch exactly as planned, plus the one cheap re-roll. Kept
+    // because a genuinely transient glitch is worth a second look before
+    // spending several requests on bisection.
     for (let contentAttempt = 0; contentAttempt < 2; contentAttempt++) {
-      const text = await this.request(batch.input, language);
-      const parts = splitBatchResponse(text, batch, DEFAULT_SEPARATOR);
+      const parts = await this.tryAlign(batch, language);
       if (parts) {
         this.stats.tokensViaApi += parts.length;
         return parts;
@@ -319,11 +385,80 @@ export class SarvamTransliterator implements TransliterationProvider {
         await this.sleep(this.backoff(0));
       }
     }
-    throw new CaptionEngineError(
-      `Sarvam returned a token count that does not match the ${batch.tokens.length} words sent ` +
-        `in batch ${bi + 1}, twice.`,
-      'Word timings would desynchronise, so this batch was not used.',
+
+    // Pass 2: bisect. A one-word batch has nothing left to try.
+    if (batch.tokens.length < 2 || this.maxSubdivisionRequests === 0) {
+      this.stats.notes.push(
+        `batch ${bi + 1}: token count mismatch on ${batch.tokens.length} word(s), ` +
+          `not alignable${this.maxSubdivisionRequests === 0 ? ' (subdivision disabled)' : ''}`,
+      );
+      return batch.tokens.map(() => null);
+    }
+
+    this.stats.subdividedBatches.push(bi + 1);
+    const budget = { left: this.maxSubdivisionRequests };
+    const out = await this.descend(batch, language, budget);
+
+    const rescued = out.filter((v) => v !== null).length;
+    const lost = out.length - rescued;
+    this.stats.tokensViaSubdivision += rescued;
+    this.stats.notes.push(
+      `batch ${bi + 1}: token count mismatch on ${batch.tokens.length} word(s) — ` +
+        `bisected into smaller requests, ${rescued} word(s) romanised` +
+        (lost > 0 ? `, ${lost} still unalignable` : '') +
+        (budget.left === 0 ? ' (subdivision budget exhausted)' : ''),
     );
+    return out;
+  }
+
+  /**
+   * Bisect until each request aligns, or until the budget runs out.
+   *
+   * Depth-first and left-to-right, so results concatenate in word order without
+   * any re-sorting. Every returned array is exactly as long as the sub-batch it
+   * answers for, which is what keeps word timings attached to the right words.
+   */
+  private async descend(
+    batch: TokenBatch,
+    language: string,
+    budget: { left: number },
+  ): Promise<Array<string | null>> {
+    const halves = subdivide(batch, { maxChars: this.maxChars });
+    if (halves.length === 0) return [null];
+
+    const out: Array<string | null> = [];
+    for (const half of halves) {
+      if (budget.left <= 0) {
+        // Out of budget: report these words as unresolved rather than sending
+        // a request we said we would not send.
+        out.push(...half.tokens.map(() => null));
+        continue;
+      }
+      budget.left--;
+      this.stats.subdivisionRequests++;
+
+      const parts = await this.tryAlign(half, language);
+      if (parts) {
+        this.stats.tokensViaApi += parts.length;
+        out.push(...parts);
+        continue;
+      }
+      // Still misaligned. A singleton cannot be divided further, so this word
+      // is genuinely unresolvable; anything larger gets halved again.
+      out.push(...(await this.descend(half, language, budget)));
+    }
+    return out;
+  }
+
+  /**
+   * One request for one batch, aligned or not.
+   *
+   * Transport and configuration failures still propagate — they are not
+   * alignment problems and must not be quietly converted into one.
+   */
+  private async tryAlign(batch: TokenBatch, language: string): Promise<string[] | null> {
+    const text = await this.request(batch.input, language);
+    return splitBatchResponse(text, batch, DEFAULT_SEPARATOR);
   }
 
   /** POST one batch, retrying transport-level failures with backoff. */
@@ -417,61 +552,65 @@ export class SarvamTransliterator implements TransliterationProvider {
   }
 
   /**
-   * Romanise one batch offline. Only this batch is affected — the rest of the
-   * transcript keeps the model output.
+   * Romanise the words a batch could not get from the model, using whatever the
+   * policy allows. Only these words are affected — the rest of the transcript,
+   * and the rest of this batch, keep the model output.
    */
   private async runFallback(
-    batch: TokenBatch,
+    tokens: string[],
     language: string,
     fallback: TransliterationProvider | null,
     why: string,
     bi: number,
   ): Promise<string[]> {
     if (!fallback) {
-      // No offline engine covers this language — the Kannada case. Sarvam is
-      // the only backend for kn/te/ta/ml/bn/gu/pa/or/as, so when one of its
-      // batches comes back with the wrong token count there is nothing to
+      // No other engine covers this language — the Kannada case. Sarvam is the
+      // only built-in backend for kn/te/ta/ml/bn/gu/pa/or/as, so when its reply
+      // cannot be aligned, even one word per request, there is nothing left to
       // romanise with.
       //
-      // The strict timestamp check is never relaxed: mismatched output is
+      // The strict alignment check is never relaxed: mismatched output is
       // discarded, not forced onto word timings. The only question is what to
-      // do with the batch afterwards, and that is the user's policy.
+      // do with those words afterwards, and that is the user's policy.
       if (this.allowNativeFallback) {
         this.stats.fallbackBatches++;
-        this.stats.tokensViaNative += batch.tokens.length;
-        this.stats.nativeBatches.push(bi + 1);
+        this.stats.tokensViaNative += tokens.length;
+        if (!this.stats.nativeBatches.includes(bi + 1)) this.stats.nativeBatches.push(bi + 1);
         this.stats.notes.push(
           `batch ${bi + 1}/${this.stats.batches}: ${why} — no offline transliterator for ` +
-            `"${language}", so these ${batch.tokens.length} word(s) KEEP THEIR NATIVE SCRIPT ` +
+            `"${language}", so these ${tokens.length} word(s) KEEP THEIR NATIVE SCRIPT ` +
             `(--roman-fallback native)`,
         );
-        return [...batch.tokens];
+        return [...tokens];
       }
       throw new CaptionEngineError(
         `Sarvam failed on batch ${bi + 1} of ${this.stats.batches} (${why}), and there is no ` +
           `offline transliterator for "${language}" to fall back to.`,
-        `Options:\n` +
+        `The reply could not be matched to the words that were sent, so it was discarded.\n` +
+          `Nothing was guessed: pairing unmatched output with word timings would\n` +
+          `desynchronise every caption after it.\n\n` +
+          `Options:\n` +
           `  • Retry — the failure may be temporary.\n` +
-          `  • Keep the native script for the failed batch only, and be told which:\n` +
+          `  • Keep the native script for the affected words only, and be told which:\n` +
           `      --roman-fallback native\n` +
           `  • Point at another service:\n` +
           `      export TRANSLITERATE_URL=...   --roman-fallback http\n` +
           `  • Or drop --script roman entirely.`,
       );
     }
-    const out = await fallback.romanise(batch.tokens, language);
-    if (out.length !== batch.tokens.length) {
+    const out = await fallback.romanise(tokens, language);
+    if (out.length !== tokens.length) {
       throw new CaptionEngineError(
         `Fallback provider "${fallback.name}" returned ${out.length} tokens for ` +
-          `${batch.tokens.length} inputs in batch ${bi + 1}.`,
+          `${tokens.length} inputs in batch ${bi + 1}.`,
         'Word timings would desynchronise.',
       );
     }
     this.stats.fallbackBatches++;
     this.stats.tokensViaFallback += out.length;
     this.stats.notes.push(
-      `batch ${bi + 1}/${this.stats.batches}: ${why} — romanised offline with "${fallback.name}" ` +
-        `(${out.length} word(s))`,
+      `batch ${bi + 1}/${this.stats.batches}: ${why} — romanised ` +
+        `${fallback.offline ? 'offline' : 'via'} "${fallback.name}" (${out.length} word(s))`,
     );
     return out;
   }
@@ -481,7 +620,9 @@ function emptyStats(): SarvamRunStats {
   return {
     batches: 0, requests: 0, retries: 0, fallbackBatches: 0,
     tokensViaApi: 0, tokensViaFallback: 0, tokensViaNative: 0, nativeBatches: [],
-    tokensPreserved: 0, largestInputChars: 0, notes: [],
+    tokensPreserved: 0, largestInputChars: 0,
+    subdivisionRequests: 0, subdividedBatches: [], tokensViaSubdivision: 0,
+    notes: [],
   };
 }
 
@@ -500,6 +641,31 @@ function positiveInt(v: string | undefined): number | undefined {
   if (!v) return undefined;
   const n = Number(v);
   return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/** As above, but 0 is meaningful — it turns subdivision off. */
+function positiveIntOrZero(v: string | undefined): number | undefined {
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * The per-batch fallback implied by `--roman-fallback http`.
+ *
+ * `undefined` (not `null`) when the policy is anything else, so the caller's
+ * default — the offline engine when it covers the language — still applies.
+ * Returning `null` here would DISABLE that default and quietly make Hindi
+ * failures fatal.
+ */
+function httpFallbackFor(
+  policy: 'error' | 'native' | 'http' | undefined,
+  env: NodeJS.ProcessEnv,
+): TransliterationProvider | undefined {
+  if (policy !== 'http' || !env.TRANSLITERATE_URL) return undefined;
+  const headers: Record<string, string> = {};
+  if (env.TRANSLITERATE_TOKEN) headers.Authorization = `Bearer ${env.TRANSLITERATE_TOKEN}`;
+  return new HttpTransliterator(env.TRANSLITERATE_URL, headers);
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +763,18 @@ export function resolveTransliterator(
   name: string | undefined,
   language: string,
   env: NodeJS.ProcessEnv = process.env,
-  opts: { allowNativeFallback?: boolean } = {},
+  opts: {
+    allowNativeFallback?: boolean;
+    /**
+     * The active --roman-fallback policy. Needed here, not just at selection
+     * time, because a batching backend can fail PART WAY THROUGH: Sarvam may
+     * resolve fine, support the language, and still hand back a batch that
+     * cannot be aligned. Without this the error told the user to try
+     * `--roman-fallback http` and that flag then had no effect on the failure
+     * it was being recommended for.
+     */
+    fallbackPolicy?: 'error' | 'native' | 'http';
+  } = {},
 ): TransliterationProvider {
   const requested = name ?? env.TRANSLITERATE_PROVIDER ?? 'auto';
 
@@ -657,9 +834,16 @@ export function resolveTransliterator(
         maxChars: positiveInt(env.SARVAM_MAX_INPUT_CHARS),
         concurrency: positiveInt(env.SARVAM_CONCURRENCY),
         maxAttempts: positiveInt(env.SARVAM_MAX_ATTEMPTS),
-        // Set by --roman-fallback native. Lets a single failed batch keep its
-        // original script instead of failing a whole render, for the languages
-        // Sarvam alone serves (kn, te, ta, ml, bn, gu, pa, or, as).
+        maxSubdivisionRequests: positiveIntOrZero(env.SARVAM_MAX_SUBDIVISION_REQUESTS),
+        // --roman-fallback http: words Sarvam could not align go to the
+        // operator's own endpoint instead of dying. Explicitly chosen, so it
+        // takes precedence over the built-in offline engine even when that
+        // engine covers the language.
+        fallback: httpFallbackFor(opts.fallbackPolicy, env),
+        // Set by --roman-fallback native. Lets the words a batch could not
+        // align keep their original script instead of failing a whole render,
+        // for the languages Sarvam alone serves (kn, te, ta, ml, bn, gu, pa,
+        // or, as).
         allowNativeFallback: opts.allowNativeFallback ?? false,
       });
     }

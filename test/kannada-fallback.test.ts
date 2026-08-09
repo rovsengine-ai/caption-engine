@@ -85,10 +85,48 @@ describe('the strict check never bends', () => {
     );
   });
 
-  test('it retries once before giving up', async () => {
+  test('it retries once, then bisects, before giving up', async () => {
+    // The batch is broken at EVERY size here, including one word per request,
+    // so this is the genuinely hopeless case. What it pins down is the shape of
+    // the effort: one cheap re-roll of the same request, then progressively
+    // smaller requests, and only then the fallback policy.
     fake = fakeSarvam({ breakBatch: () => true });
-    await kn({ allowNativeFallback: true }).romanise(KANNADA, 'kn');
-    assert.equal(fake.calls.length, 2, 'expected one retry of the broken batch');
+    const p = kn({ allowNativeFallback: true });
+    await p.romanise(KANNADA, 'kn');
+
+    assert.equal(p.stats.retries, 1, 'exactly one re-roll of the identical request');
+    assert.deepEqual(p.stats.subdividedBatches, [1], 'then the batch was bisected');
+    assert.ok(p.stats.subdivisionRequests > 0, 'smaller requests were actually tried');
+    assert.equal(
+      fake.calls.length,
+      2 + p.stats.subdivisionRequests,
+      'every request is accounted for: the first, its retry, and the bisection',
+    );
+    // Bisection bottoms out at one word per request, which is the only size
+    // that cannot be mis-split. Reaching it proves nothing was skipped.
+    assert.ok(
+      fake.calls.some((c) => !c.includes('|')),
+      'the recursion must reach single-word requests',
+    );
+  });
+
+  test('bisection is bounded — a hopeless batch cannot become a request storm', async () => {
+    fake = fakeSarvam({ breakBatch: () => true });
+    const p = kn({ allowNativeFallback: true, maxSubdivisionRequests: 3 });
+    const out = await p.romanise(KANNADA, 'kn');
+
+    assert.ok(p.stats.subdivisionRequests <= 3, 'the budget is a hard ceiling');
+    assert.equal(out.length, KANNADA.length, 'and the budget never costs a word');
+    assert.deepEqual(out, KANNADA);
+  });
+
+  test('subdivision can be switched off entirely', async () => {
+    fake = fakeSarvam({ breakBatch: () => true });
+    const p = kn({ allowNativeFallback: true, maxSubdivisionRequests: 0 });
+    await p.romanise(KANNADA, 'kn');
+
+    assert.equal(fake.calls.length, 2, 'just the request and its retry');
+    assert.deepEqual(p.stats.subdividedBatches, []);
   });
 
   test('output length always equals input length, whatever happened', async () => {

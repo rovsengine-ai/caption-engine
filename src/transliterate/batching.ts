@@ -207,21 +207,92 @@ export function assertBatchPlan(
  * Otherwise we split on the separator's core character and trim, which tolerates
  * the model altering the spacing around it.
  *
- * Returns null when the count does not match, so the caller can retry or fall
- * back. It deliberately does not pad or truncate to fit: a plausible-looking
- * wrong-length result is exactly how timings desynchronise.
+ * Two tolerances, both of which are provably content-preserving:
+ *
+ *   - a stray separator at the very start or very end of the reply produces an
+ *     empty piece there. Dropping an EDGE empty cannot reorder or lose a word,
+ *     so it is safe. An INTERIOR empty is not dropped: that would mean guessing
+ *     which word the model swallowed, and guessing is what desynchronises
+ *     captions.
+ *   - surrounding whitespace is trimmed.
+ *
+ * Returns null when the count does not match, or when any piece came back
+ * empty, so the caller can subdivide, retry or fall back. It deliberately does
+ * not pad or truncate to fit: a plausible-looking wrong-length result is exactly
+ * how timings desynchronise. An empty piece is treated as a failure rather than
+ * an answer, because "the model returned nothing for this word" previously
+ * slipped through and left that word silently in its original script.
  */
 export function splitBatchResponse(
   text: string,
   batch: TokenBatch,
   separator: string = DEFAULT_SEPARATOR,
 ): string[] | null {
-  if (batch.singleton) return [text.trim()];
+  if (batch.singleton) {
+    const only = text.trim();
+    return only.length > 0 ? [only] : null;
+  }
 
   const core = separator.trim() || separator;
   const parts = text.split(core).map((s) => s.trim());
+
+  // Only ever an edge separator, and only when it actually helps.
+  while (parts.length > batch.tokens.length && parts[0] === '') parts.shift();
+  while (parts.length > batch.tokens.length && parts[parts.length - 1] === '') parts.pop();
+
   if (parts.length !== batch.tokens.length) return null;
+  if (parts.some((p) => p.length === 0)) return null;
   return parts;
+}
+
+/**
+ * Split one batch into two, for when the model's reply could not be aligned.
+ *
+ * This is the recovery step that makes a mismatch survivable. Re-sending the
+ * SAME string is nearly pointless — a model that mis-delimited 62 words will
+ * usually do it again — but half as many words is a different request, and the
+ * recursion bottoms out at a single token, which is sent with no separator at
+ * all and therefore cannot be mis-split. Correctness at the leaves is
+ * structural, not probabilistic.
+ *
+ * Indices travel with the tokens, so a sub-batch still knows which words it is
+ * answering for and word timings stay attached to the right words.
+ *
+ * Returns [] for a batch that cannot be divided further (a singleton).
+ */
+export function subdivide(
+  batch: TokenBatch,
+  opts: BatchOptions = {},
+): TokenBatch[] {
+  if (batch.tokens.length < 2) return [];
+  const separator = opts.separator ?? DEFAULT_SEPARATOR;
+  const maxChars = opts.maxChars ?? DEFAULT_MAX_BATCH_CHARS;
+  const mid = Math.floor(batch.tokens.length / 2);
+  return [
+    sliceBatch(batch, 0, mid, separator, maxChars),
+    sliceBatch(batch, mid, batch.tokens.length, separator, maxChars),
+  ];
+}
+
+function sliceBatch(
+  batch: TokenBatch,
+  from: number,
+  to: number,
+  separator: string,
+  maxChars: number,
+): TokenBatch {
+  const tokens = batch.tokens.slice(from, to);
+  const indices = batch.indices.slice(from, to);
+  const input = tokens.join(separator);
+  return {
+    indices,
+    tokens,
+    input,
+    singleton: tokens.length === 1,
+    // A slice is never longer than its parent, so this can only be true if the
+    // parent was already oversize — but assert it rather than assume it.
+    oversize: tokens.length === 1 && measure(input) > maxChars,
+  };
 }
 
 /**

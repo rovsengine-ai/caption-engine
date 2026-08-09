@@ -148,6 +148,33 @@ Or `--provider deepgram`. Not needed with `--transcript-in`, `--dry-run`, or `do
 Expected. Sarvam's REST API returns sentence-level timestamps, which cannot drive
 word-timed captions. Use `--provider elevenlabs` or `--provider deepgram`.
 
+### `Sarvam returned a token count that does not match the N words sent`
+
+Sarvam romanises a *string*, not an array, so a batch goes out pipe-delimited and the reply
+has to split back into the same number of pieces. Long batches give the model many
+delimiters to get wrong. The reply cannot be matched to word timings, so it is discarded —
+that part is correct and deliberate.
+
+The batch is now retried once, then **bisected** into smaller requests down to one word
+each, which cannot be mis-split. If you still see this error, the model is failing on
+individual words:
+
+```bash
+# keep only the unrescuable words in their original script, and be told which
+--roman-fallback native
+
+# or send just those words to your own endpoint
+export TRANSLITERATE_URL=https://your-service/transliterate
+--roman-fallback http
+```
+
+Bisection costs extra API requests, capped at 48 per batch. Change it with
+`SARVAM_MAX_SUBDIVISION_REQUESTS`; `0` disables it.
+
+For `hi`, `mr` and `ne` this rarely surfaces at all — the offline engine covers those, so
+an unalignable batch quietly falls back to rules. It is `kn te ta ml bn gu pa or as` that
+have no offline engine.
+
 ### Captions are out of sync with speech
 
 1. Confirm the provider returned real word timings — check `hasWordTimings` in

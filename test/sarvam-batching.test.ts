@@ -529,10 +529,11 @@ describe('malformed responses and API failures', () => {
     );
   });
 
-  test('one persistently bad batch does not discard the good ones', async () => {
-    // Broken by content, so it stays broken across its retry and genuinely
-    // reaches the fallback. Keying on call number would recover on the retry —
-    // correct behaviour, but it would not exercise this path.
+  test('one persistently bad batch is recovered by bisection, not degraded', async () => {
+    // Broken by content: this exact request string always comes back
+    // mis-delimited, so it survives its retry. Smaller requests are DIFFERENT
+    // strings, so bisection gets the batch back at model quality rather than
+    // dropping it to the offline engine.
     let firstInput: string | null = null;
     fake = installFakeSarvam({
       malformedFor: (input) => {
@@ -545,9 +546,25 @@ describe('malformed responses and API failures', () => {
     const r = await romaniseTranscript(t, p, { language: 'hi' });
 
     assert.ok(p.stats.batches > 2, 'fixture spans several batches');
-    assert.equal(p.stats.fallbackBatches, 1, 'exactly one batch degraded');
-    assert.ok(p.stats.tokensViaApi > 0, 'the rest still used the model');
+    assert.deepEqual(p.stats.subdividedBatches, [1], 'the bad batch was bisected');
+    assert.equal(p.stats.fallbackBatches, 0, 'and did not need the offline engine at all');
+    assert.ok(p.stats.tokensViaSubdivision > 0, 'its words came back from the model');
     assert.equal(r.transcript.words.length, 900);
+  });
+
+  test('a batch that is broken at EVERY size still falls back, once', async () => {
+    // The complement: when no request size works, bisection is exhausted and
+    // the offline engine takes over — for those words only.
+    const poison = 'क्ष';
+    fake = installFakeSarvam({ malformedFor: (input) => input.includes(poison) });
+    const tokens = [...indicTokens(120), poison];
+    const p = sarvam({ maxAttempts: 1 });
+    const out = await p.romanise(tokens, 'hi');
+
+    assert.equal(out.length, tokens.length, 'count preserved');
+    assert.ok(p.stats.fallbackBatches >= 1, 'the offline engine was used');
+    assert.ok(p.stats.tokensViaApi > 0, 'but only for the words that needed it');
+    assert.ok(!out[out.length - 1]!.startsWith('R'), 'the poison word did not use API output');
   });
 
   test('a single malformed reply recovers on retry — no needless degradation', async () => {

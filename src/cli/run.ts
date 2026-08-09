@@ -427,7 +427,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       try {
         const probe = resolveTransliterator(
           opts.transliterate, romanLang, process.env,
-          { allowNativeFallback: opts.romanFallback === 'native' },
+          {
+            allowNativeFallback: opts.romanFallback === 'native',
+            fallbackPolicy: opts.romanFallback,
+          },
         );
         available = probe.supports(romanLang);
         if (!available) why = `"${probe.name}" does not cover ${romanLang}`;
@@ -533,11 +536,28 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         `batching   ${b.batches} request(s), largest ${b.largestInputChars} chars` +
           (b.retries ? `, ${b.retries} retr${b.retries === 1 ? 'y' : 'ies'}` : ''),
       );
+
+      // Bisection is a success story, not a failure: these words would have
+      // killed the run before. Reported all the same, because it means the
+      // backend is mis-delimiting and it costs extra requests.
+      if (b.subdividedBatches.length > 0) {
+        log.info(
+          `alignment  batch(es) ${b.subdividedBatches.join(', ')} came back mis-delimited and ` +
+            `were split into smaller requests — ${b.subdivisionRequests} extra request(s), ` +
+            `${b.tokensViaSubdivision} word(s) recovered`,
+        );
+      }
+
       if (b.fallbackBatches > 0) {
+        const via = b.tokensViaFallback > 0
+          ? `${b.tokensViaFallback} word(s) were romanised by the fallback provider`
+          : '';
+        const kept = b.tokensViaNative > 0
+          ? `${b.tokensViaNative} word(s) kept their original script`
+          : '';
         log.warn(
-          `${b.fallbackBatches} of ${b.batches} batch(es) could not be romanised by ` +
-            `${romanised.provider} — ${b.tokensViaFallback} word(s) fell back to the offline ` +
-            `engine. Those words are lower quality on English loanwords.`,
+          `${b.fallbackBatches} batch fallback(s) while romanising with ${romanised.provider} — ` +
+            [via, kept].filter(Boolean).join(', ') + '.',
         );
         for (const n of b.notes.slice(0, 5)) log.warn(`   ${n}`);
         if (b.notes.length > 5) log.warn(`   … and ${b.notes.length - 5} more`);

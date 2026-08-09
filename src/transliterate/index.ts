@@ -96,6 +96,12 @@ export interface RomanisationResult {
     /** Which batches those were. Named, so the report can point at them. */
     nativeBatches: number[];
     largestInputChars: number;
+    /** Extra requests spent bisecting batches whose reply would not align. */
+    subdivisionRequests: number;
+    /** Which batches had to be bisected. */
+    subdividedBatches: number[];
+    /** Words bisection rescued that would previously have failed the run. */
+    tokensViaSubdivision: number;
     notes: string[];
   };
 }
@@ -282,6 +288,9 @@ function readBatchStats(provider: TransliterationProvider): RomanisationResult['
     nativeBatches: Array.isArray(s.nativeBatches) ? (s.nativeBatches as number[]) : [],
     tokensViaFallback: Number(s.tokensViaFallback) || 0,
     largestInputChars: Number(s.largestInputChars) || 0,
+    subdivisionRequests: Number(s.subdivisionRequests) || 0,
+    subdividedBatches: Array.isArray(s.subdividedBatches) ? (s.subdividedBatches as number[]) : [],
+    tokensViaSubdivision: Number(s.tokensViaSubdivision) || 0,
     notes: Array.isArray(s.notes) ? (s.notes as string[]) : [],
   };
 }
@@ -351,7 +360,12 @@ function resolveWithPolicy(
   const allowNative = policy === 'native';
 
   try {
-    const p = resolveTransliterator(requested, language, env, { allowNativeFallback: allowNative });
+    const p = resolveTransliterator(requested, language, env, {
+      allowNativeFallback: allowNative,
+      // The policy must reach the backend, not just the choice of backend: a
+      // batching provider can support the language and still fail on one batch.
+      fallbackPolicy: policy,
+    });
     if (p.supports(language)) return { provider: p, fallbackUsed: null, fallbackReason: null };
 
     // Configured, but does not cover this language.

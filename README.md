@@ -395,9 +395,40 @@ Fallback:          native  (the "local" transliterator does not cover "kn")
 backend. Sarvam occasionally returns a different number of tokens than the words sent in a
 batch. That output cannot be aligned to word timings, so it is discarded; the strict check
 never bends. Previously there was nothing to fall back to and the whole render died on one
-bad batch.
+bad batch:
 
-Now:
+```
+Sarvam failed on batch 1 of 1:
+Sarvam returned a token count that does not match the 62 words sent in batch 1, twice.
+There is no offline transliterator for "kn" to fall back to.
+```
+
+**Why it happened.** Sarvam romanises a *string*, not an array, so a batch goes out as one
+pipe-delimited request and the reply has to split back into exactly the same number of
+pieces. 62 words means 61 delimiters the model has to preserve; the more words per request,
+the likelier one gets merged, dropped or invented. Re-sending the identical request — the
+old retry — mostly re-rolls the same dice.
+
+**What happens now.** After the one cheap retry, the batch is **bisected** and asked again
+in smaller requests, recursively. A single-word request carries no delimiter at all, so its
+reply cannot be mis-split: the leaves of that recursion are correct by construction rather
+than by luck. In practice a mis-delimited batch now comes back fully romanised for a
+handful of extra requests, and only words that fail even *alone* reach the fallback policy
+below — so one stubborn word costs one word, not the 61 it was packed with.
+
+Nothing was loosened to achieve this. Mismatched output is still discarded, never padded,
+truncated or paired up with timings by guesswork.
+
+```
+alignment  batch(es) 1 came back mis-delimited and were split into smaller requests
+           — 14 extra request(s), 62 word(s) recovered
+```
+
+Bisection is bounded: at most 48 extra requests per batch by default, since the recovery
+costs real API calls. Tune or disable it with `SARVAM_MAX_SUBDIVISION_REQUESTS` (`0` turns
+it off and restores the old fail-the-batch behaviour).
+
+For the words that still cannot be aligned:
 
 ```bash
 # stop on a mismatch (default, unchanged behaviour)
@@ -413,12 +444,17 @@ node dist/src/cli.js talk.mp4 --script roman --transliterate sarvam \
   --language auto --roman-fallback http
 ```
 
-Only the failed batch degrades — good batches still romanise — and the report names it:
+Only the affected **words** degrade — the rest of the batch keeps its model-quality
+romanisation — and the report names them:
 
 ```
-! batch 3/7: Sarvam returned a token count that does not match the 14 words sent, twice
-  — no offline transliterator for "kn", so these 14 word(s) KEEP THEIR NATIVE SCRIPT
+! batch 3/7: 2 of 14 word(s) could not be aligned, even one word per request
+  — no offline transliterator for "kn", so these 2 word(s) KEEP THEIR NATIVE SCRIPT
 ```
+
+`--roman-fallback http` now applies to this case too. It previously only influenced which
+backend was *chosen*, so when Sarvam was picked and then failed mid-run, the flag the error
+message recommended had no effect on the failure it was being recommended for.
 
 Word count, word order and every timestamp are unchanged either way. English Latin tokens
 are never sent to the API and come back byte-identical.
