@@ -10,9 +10,19 @@
  */
 import { toRomanScript } from '../src/transliterate/index.js';
 import { loadGlossary } from '../src/transliterate/glossary.js';
-import { autoTrim } from '../src/autotrim/index.js';
+import { autoTrim, applyTrim, applyHandles, snapCutsToFrames } from '../src/autotrim/index.js';
 import { listLanguages } from '../src/config/languages.js';
+import { groupIntoCues } from '../src/captions/group.js';
+import { resolveStyle } from '../src/captions/style.js';
+import { wordErrorRate, characterErrorRate, categoryBreakdown, tokenise } from '../src/eval/wer.js';
+import { measureDrift, measureTrimDrift } from '../src/eval/timestamps.js';
+import { measureReadability } from '../src/eval/readability.js';
+import { scoreFillerFixture, aggregateFillerScores } from '../src/eval/fillers.js';
+import { loadFillerFixtures, loadGroundTruth } from '../src/eval/fixtures.js';
 import type { Transcript } from '../src/types.js';
+
+const pct = (n: number | null): string => (n === null ? '   n/a' : `${(n * 100).toFixed(1)}%`);
+const rate = (n: number | null): string => (n === null ? 'n/a' : n.toFixed(4));
 
 interface Case {
   label: string;
@@ -168,6 +178,66 @@ function evaluateAutoTrim(): {
   return { proposed: cuts.length, falsePositives, byReason };
 }
 
+/**
+ * Tier A: timestamp drift through our own stages.
+ *
+ * Transliteration must move nothing at all. Auto Trim must move surviving words
+ * by exactly the duration of the cuts that precede them. Both are checkable
+ * without any reference data, and both are where sync bugs actually come from.
+ */
+async function evaluateTimestamps() {
+  const words = [
+    ['आज', 0.40, 0.80], ['meeting', 0.90, 1.50], ['बहुत', 1.60, 2.00],
+    ['important', 2.10, 2.80], ['है', 2.90, 3.10],
+    ['um', 3.90, 4.15],
+    ['कल', 4.20, 4.50], ['से', 4.55, 4.75], ['शुरू', 4.80, 5.20],
+  ] as Array<[string, number, number]>;
+
+  const base: Transcript = {
+    words: words.map(([text, start, end]) => ({
+      text, start, end, confidence: 0.97, type: 'word' as const,
+    })),
+    language: 'hi', duration: 9, provider: 'fixture', hasWordTimings: true,
+  };
+
+  const romanised = await toRomanScript(base, { language: 'hi', protectEnglish: true });
+  const translit = measureDrift(base, romanised.transcript);
+
+  const trim = autoTrim(base);
+  const shaped = snapCutsToFrames(applyHandles(trim, 0.04), 30);
+  const trimmed = applyTrim(base, shaped);
+  const trimDrift = measureTrimDrift(base, trimmed, shaped);
+
+  return { translit, trimDrift, cuts: shaped.cuts.length };
+}
+
+/** Tier A: does the grouper stay inside the style's own budget? */
+function evaluateReadability() {
+  const sentence = (
+    'aaj main aapko ek bahut hi interesting project dikhata hoon jo maine ' +
+    'pichhle mahine banaya tha aur yeh kaafi useful nikla'
+  ).split(' ');
+
+  const t: Transcript = {
+    words: sentence.map((text, i) => ({
+      text, start: 0.3 + i * 0.42, end: 0.3 + i * 0.42 + 0.36,
+      confidence: 0.96, type: 'word' as const,
+    })),
+    language: 'hi', duration: sentence.length * 0.42 + 1, provider: 'fixture', hasWordTimings: true,
+  };
+
+  const out: Record<string, ReturnType<typeof measureReadability>> = {};
+  for (const preset of ['default', 'bold', 'classic']) {
+    const style = resolveStyle(preset, 1920);
+    const cues = groupIntoCues(t, {
+      maxWordsPerCue: style.maxWordsPerCue,
+      maxCharsPerLine: style.maxCharsPerLine,
+    });
+    out[preset] = measureReadability(cues, style);
+  }
+  return out;
+}
+
 async function main() {
   const asJson = process.argv.includes('--json');
   const results: CaseResult[] = [];
@@ -176,6 +246,37 @@ async function main() {
   const trim = evaluateAutoTrim();
   const glossary = loadGlossary();
   const langs = listLanguages();
+
+  // ---- Tier A: no ground truth needed, no API cost -----------------------
+  const timestamps = await evaluateTimestamps();
+  const readability = evaluateReadability();
+  const fillerLoad = loadFillerFixtures();
+  const fillerScores = aggregateFillerScores(
+    fillerLoad.fixtures.map((f) => scoreFillerFixture(f)),
+  );
+
+  // ---- Tier B: ground truth, only if supplied ----------------------------
+  const gt = loadGroundTruth();
+  const werResults = gt.pairs.map((p) => {
+    const reference = tokenise(p.reference);
+    const w = wordErrorRate(reference, p.hypothesis);
+    const c = characterErrorRate(p.reference, p.hypothesis.join(' '));
+    return {
+      name: p.name,
+      language: p.language ?? 'unknown',
+      wer: w.rate,
+      cer: c.rate,
+      referenceWords: w.referenceLength,
+      substitutions: w.substitutions,
+      deletions: w.deletions,
+      insertions: w.insertions,
+      categories: categoryBreakdown(
+        w.alignment,
+        reference,
+        p.knownNames ? new Set(p.knownNames) : undefined,
+      ),
+    };
+  });
 
   const exact = results.filter((r) => r.exactMatch === true).length;
   const exactTotal = results.filter((r) => r.exactMatch !== null).length;
@@ -200,7 +301,11 @@ async function main() {
   };
 
   if (asJson) {
-    process.stdout.write(JSON.stringify({ summary, results, trim }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({
+      summary, results, trim,
+      tierA: { timestamps, readability, fillers: fillerScores, fixtureProblems: fillerLoad.problems },
+      tierB: { supplied: gt.pairs.length, dir: gt.dir, results: werResults, problems: gt.problems },
+    }, null, 2) + '\n');
     return;
   }
 
@@ -240,14 +345,106 @@ async function main() {
   console.log('  Review status');
   console.log(`    native-speaker reviewed      ${summary.nativeSpeakerReviewed.join(', ') || 'none'}`);
   console.log('='.repeat(78));
+
+  // ---- Tier A ------------------------------------------------------------
+  console.log('\nTIER A — pipeline behaviour   (no ground truth, no audio, no API cost)');
+  console.log('-'.repeat(78));
+  console.log('  These measure what THIS CODE does to a transcript.');
+  console.log('  They say nothing about ASR accuracy — see TIER B.\n');
+
+  console.log('  Timestamp drift');
+  console.log(`    transliteration              max ${timestamps.translit.maxAbsSec.toFixed(4)}s ` +
+    `over ${timestamps.translit.count} words   (must be 0.0000)`);
+  console.log(`    Auto Trim re-timing          max ${timestamps.trimDrift.maxAbsSec.toFixed(4)}s ` +
+    `over ${timestamps.trimDrift.keptWords} kept words, ${timestamps.cuts} cut(s)`);
+  console.log(`    mispredicted shifts          ${timestamps.trimDrift.mispredicted}   (must be 0)`);
+
+  console.log('  Caption readability             cues  flagged  mean cps  p95 cps  over-budget');
+  for (const [preset, r] of Object.entries(readability)) {
+    console.log(
+      `    ${preset.padEnd(28)}${String(r.cues).padStart(4)}` +
+      `${String(r.flagged).padStart(9)}${r.meanCharsPerSecond.toFixed(1).padStart(10)}` +
+      `${r.p95CharsPerSecond.toFixed(1).padStart(9)}${String(r.overLineBudget + r.overWordBudget).padStart(13)}`,
+    );
+  }
+
+  console.log('  Filler detection');
+  if (fillerLoad.fixtures.length === 0) {
+    console.log('    no fixtures found in test/fixtures/eval/');
+  } else {
+    console.log(`    precision                    ${pct(fillerScores.precision)}   ` +
+      `(${fillerScores.truePositives}/${fillerScores.truePositives + fillerScores.falsePositives} proposed were real fillers)`);
+    console.log(`    recall                       ${pct(fillerScores.recall)}   ` +
+      `(${fillerScores.truePositives}/${fillerScores.truePositives + fillerScores.falseNegatives} labelled fillers found)`);
+    console.log(`    sample                       ${fillerScores.fixtures} fixture(s), ` +
+      `${fillerScores.truePositives + fillerScores.falseNegatives} labelled fillers`);
+    if (fillerScores.falsePositiveWords.length) {
+      console.log(`    REAL WORDS CUT               ${fillerScores.falsePositiveWords.join(', ')}`);
+    }
+    if (fillerScores.missedWords.length) {
+      console.log(`    fillers missed               ${fillerScores.missedWords.join(', ')}`);
+    }
+    for (const f of fillerScores.perFixture) {
+      console.log(`      ${f.fixture.padEnd(24)} ${f.language}  P ${pct(f.precision)}  R ${pct(f.recall)}`);
+    }
+  }
+  for (const p of fillerLoad.problems) console.log(`    FIXTURE PROBLEM  ${p.file}: ${p.problem}`);
+
+  console.log('\n  Precision and recall are NOT averaged into an F-score. A recall miss');
+  console.log('  leaves a filler in; a precision miss deletes a real word. Those are not');
+  console.log('  worth the same, and a single number would hide which one moved.');
+
+  // ---- Tier B ------------------------------------------------------------
+  console.log('\nTIER B — recognition accuracy   (needs ground truth you supply)');
+  console.log('-'.repeat(78));
+  if (gt.pairs.length === 0) {
+    console.log('  NOT MEASURED — no ground-truth pairs supplied.');
+    console.log(`  WER and CER require a human reference transcript. Nothing can`);
+    console.log(`  synthesise one, so this section is empty rather than estimated.`);
+    console.log(`\n  To populate it, add to ${gt.dir}:`);
+    console.log('    <name>.asr.json        a transcript saved with --transcript-out');
+    console.log('    <name>.reference.txt   what was actually said');
+    console.log('  See test/fixtures/eval/README.md. Both are gitignored.');
+  } else {
+    console.log('  pair                     lang    WER      CER    ref words   S/D/I');
+    for (const r of werResults) {
+      console.log(
+        `  ${r.name.padEnd(24)} ${(r.language ?? '?').padEnd(6)} ` +
+        `${rate(r.wer).padStart(6)}  ${rate(r.cer).padStart(6)}  ` +
+        `${String(r.referenceWords).padStart(9)}   ${r.substitutions}/${r.deletions}/${r.insertions}`,
+      );
+      for (const c of r.categories) {
+        if (c.total === 0) continue;
+        console.log(`      ${c.category.padEnd(10)} ${pct(c.accuracy)}  (${c.correct}/${c.total})` +
+          (c.errors.length ? `   e.g. ${c.errors.slice(0, 3).map((e) => `${e.ref}→${e.hyp ?? '∅'}`).join(', ')}` : ''));
+      }
+    }
+    const totalRef = werResults.reduce((n, r) => n + r.referenceWords, 0);
+    if (totalRef < 500) {
+      console.log(`\n  SAMPLE TOO SMALL: ${totalRef} reference words. A WER computed on fewer`);
+      console.log('  than ~500 words has an error bar wider than most differences worth');
+      console.log('  detecting. Treat it as a smoke test, not a measurement.');
+    }
+  }
+  for (const p of gt.problems) console.log(`  FIXTURE PROBLEM  ${p.file}: ${p.problem}`);
+
+  console.log('\n' + '='.repeat(78));
   console.log(
-    '\n  These numbers describe a small hand-written set. They are a regression\n' +
-    '  floor, not evidence of accuracy on real content. Hindi romanisation and\n' +
-    '  the filler lexicons remain UNREVIEWED by a native speaker — see\n' +
-    '  docs/NATIVE_REVIEW.md.\n',
+    '\n  Tier A describes a small hand-written set. It is a regression floor,\n' +
+    '  not evidence of accuracy on real content. Tier B is empty until you\n' +
+    '  supply references. Hindi romanisation and the filler lexicons remain\n' +
+    '  UNREVIEWED by a native speaker — see docs/NATIVE_REVIEW.md.\n',
   );
 
-  if (badTotal > 0 || trim.falsePositives.length > 0) process.exitCode = 1;
+  const regressions =
+    badTotal > 0 ||
+    trim.falsePositives.length > 0 ||
+    fillerScores.falsePositives > 0 ||
+    timestamps.translit.maxAbsSec > 0 ||
+    timestamps.trimDrift.mispredicted > 0 ||
+    fillerLoad.problems.length > 0 ||
+    gt.problems.length > 0;
+  if (regressions) process.exitCode = 1;
 }
 
 main().catch((e) => {

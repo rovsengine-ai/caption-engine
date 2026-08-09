@@ -24,6 +24,11 @@ demo-out/
 # Real test clips are supplied locally; tests skip when they are absent.
 test/fixtures/media/
 
+# Tier B evaluation ground truth: your own recordings and references.
+# Tier A fixtures (*.fillers.json) ARE committed.
+test/fixtures/eval/*.asr.json
+test/fixtures/eval/*.reference.txt
+
 # Extracted frames and analysis caches (shot analysis writes here).
 frames/
 .cache/

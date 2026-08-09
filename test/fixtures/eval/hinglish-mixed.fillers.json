@@ -1,0 +1,42 @@
+{
+  "name": "hinglish-mixed",
+  "language": "hi",
+  "durationSec": 14.0,
+  "_note": "Hand-labelled. isFiller is what a human editor would cut. The point of this fixture is the near-misses: 'matlab' appears twice, once as hesitation and once as the real word 'meaning'; 'haan' is an answer; 'aa' is a verb. Getting recall up while keeping these is the whole job.",
+  "words": [
+    { "text": "toh", "start": 0.40, "end": 0.65, "isFiller": false },
+    { "text": "aaj", "start": 0.70, "end": 1.00, "isFiller": false },
+    { "text": "main", "start": 1.05, "end": 1.30, "isFiller": false },
+    { "text": "aapko", "start": 1.35, "end": 1.75, "isFiller": false },
+    { "text": "um", "start": 2.30, "end": 2.55, "isFiller": true },
+    { "text": "ek", "start": 2.60, "end": 2.80, "isFiller": false },
+    { "text": "project", "start": 2.85, "end": 3.35, "isFiller": false },
+    { "text": "dikhata", "start": 3.40, "end": 3.90, "isFiller": false },
+    { "text": "hoon", "start": 3.95, "end": 4.20, "isFiller": false },
+
+    { "text": "matlab", "start": 4.90, "end": 5.25, "isFiller": true },
+    { "text": "yeh", "start": 5.30, "end": 5.50, "isFiller": false },
+    { "text": "bahut", "start": 5.55, "end": 5.90, "isFiller": false },
+    { "text": "important", "start": 5.95, "end": 6.60, "isFiller": false },
+    { "text": "hai", "start": 6.65, "end": 6.85, "isFiller": false },
+
+    { "text": "iska", "start": 7.00, "end": 7.30, "isFiller": false },
+    { "text": "matlab", "start": 7.35, "end": 7.75, "isFiller": false },
+    { "text": "hai", "start": 7.80, "end": 8.00, "isFiller": false },
+    { "text": "success", "start": 8.05, "end": 8.60, "isFiller": false },
+
+    { "text": "haan", "start": 8.90, "end": 9.20, "isFiller": false },
+    { "text": "bilkul", "start": 9.25, "end": 9.70, "isFiller": false },
+    { "text": "sahi", "start": 9.75, "end": 10.05, "isFiller": false },
+    { "text": "hai", "start": 10.10, "end": 10.30, "isFiller": false },
+
+    { "text": "hmm", "start": 10.90, "end": 11.20, "isFiller": true },
+    { "text": "aa", "start": 11.25, "end": 11.50, "isFiller": false },
+    { "text": "jao", "start": 11.55, "end": 11.85, "isFiller": false },
+    { "text": "yahan", "start": 11.90, "end": 12.30, "isFiller": false },
+
+    { "text": "uh", "start": 12.80, "end": 13.00, "isFiller": true },
+    { "text": "bas", "start": 13.05, "end": 13.35, "isFiller": false },
+    { "text": "itna", "start": 13.40, "end": 13.70, "isFiller": false }
+  ]
+}

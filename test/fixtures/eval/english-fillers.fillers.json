@@ -1,0 +1,38 @@
+{
+  "name": "english-fillers",
+  "language": "en",
+  "durationSec": 12.0,
+  "_note": "English is the only language whose filler lexicon has been native-speaker reviewed, so this fixture is the control: whatever score the Indic fixtures get, this one bounds what the detector can do when the lexicon is known-good. Includes the traps: the article 'a', emphatic repetition, and 'so'/'right' used as real words.",
+  "words": [
+    { "text": "so", "start": 0.30, "end": 0.55, "isFiller": false },
+    { "text": "this", "start": 0.60, "end": 0.85, "isFiller": false },
+    { "text": "is", "start": 0.90, "end": 1.05, "isFiller": false },
+    { "text": "a", "start": 1.10, "end": 1.20, "isFiller": false },
+    { "text": "test", "start": 1.25, "end": 1.65, "isFiller": false },
+
+    { "text": "um", "start": 2.20, "end": 2.45, "isFiller": true },
+    { "text": "let", "start": 2.50, "end": 2.70, "isFiller": false },
+    { "text": "me", "start": 2.75, "end": 2.90, "isFiller": false },
+    { "text": "explain", "start": 2.95, "end": 3.50, "isFiller": false },
+
+    { "text": "uh", "start": 4.10, "end": 4.30, "isFiller": true },
+    { "text": "the", "start": 4.35, "end": 4.55, "isFiller": false },
+    { "text": "point", "start": 4.60, "end": 5.00, "isFiller": false },
+    { "text": "is", "start": 5.05, "end": 5.25, "isFiller": false },
+
+    { "text": "thank", "start": 5.60, "end": 5.95, "isFiller": false },
+    { "text": "you", "start": 6.00, "end": 6.25, "isFiller": false },
+    { "text": "thank", "start": 6.30, "end": 6.65, "isFiller": false },
+    { "text": "you", "start": 6.70, "end": 6.95, "isFiller": false },
+
+    { "text": "that", "start": 7.30, "end": 7.55, "isFiller": false },
+    { "text": "is", "start": 7.60, "end": 7.75, "isFiller": false },
+    { "text": "right", "start": 7.80, "end": 8.15, "isFiller": false },
+
+    { "text": "hmm", "start": 8.80, "end": 9.10, "isFiller": true },
+    { "text": "erm", "start": 9.15, "end": 9.40, "isFiller": true },
+    { "text": "anyway", "start": 9.45, "end": 9.95, "isFiller": false },
+    { "text": "moving", "start": 10.00, "end": 10.45, "isFiller": false },
+    { "text": "on", "start": 10.50, "end": 10.70, "isFiller": false }
+  ]
+}
