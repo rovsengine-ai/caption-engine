@@ -32,12 +32,32 @@ export const SARVAM_HARD_LIMIT = 1000;
 /** What we actually aim for, leaving headroom under the hard limit. */
 export const DEFAULT_MAX_BATCH_CHARS = 900;
 
+/**
+ * Ceiling on WORDS per request, independent of the character budget.
+ *
+ * The character budget alone was letting ~60 short Kannada words into one
+ * request, and every extra word is another delimiter the model has to preserve
+ * exactly. Mismatch risk scales with the number of delimiters, not with the
+ * number of characters, so a budget measured only in characters optimises the
+ * wrong quantity: it packs SHORT-word languages — Kannada, Telugu, Tamil,
+ * Malayalam — the most densely, which is precisely where alignment fails most.
+ *
+ * 25 keeps requests comfortably inside both limits while cutting the delimiter
+ * count per request by more than half. It costs more requests on long
+ * transcripts; that is the trade, and it is cheaper than the two wasted
+ * requests plus a bisection cascade that a mismatch triggers. Override with
+ * SARVAM_MAX_WORDS_PER_BATCH.
+ */
+export const DEFAULT_MAX_BATCH_WORDS = 25;
+
 /** Joined between tokens in one request; also the split point on the way back. */
 export const DEFAULT_SEPARATOR = ' | ';
 
 export interface BatchOptions {
   /** Hard cap on the joined `input` string, in UTF-16 code units. */
   maxChars?: number;
+  /** Hard cap on how many words share one request. */
+  maxWords?: number;
   separator?: string;
 }
 
@@ -98,6 +118,7 @@ export function planBatches(
   opts: BatchOptions = {},
 ): TokenBatch[] {
   const maxChars = opts.maxChars ?? DEFAULT_MAX_BATCH_CHARS;
+  const maxWords = Math.max(1, opts.maxWords ?? DEFAULT_MAX_BATCH_WORDS);
   const separator = opts.separator ?? DEFAULT_SEPARATOR;
   const idx = indices ?? tokens.map((_, i) => i);
 
@@ -150,7 +171,9 @@ export function planBatches(
 
     // Cost of appending: the separator only exists between tokens.
     const added = curTokens.length === 0 ? tokLen : separator.length + tokLen;
-    if (curTokens.length > 0 && curLen + added > maxChars) flush();
+    if (curTokens.length > 0 && (curLen + added > maxChars || curTokens.length >= maxWords)) {
+      flush();
+    }
 
     curIndices.push(at);
     curTokens.push(tok);
@@ -229,12 +252,12 @@ export function splitBatchResponse(
   separator: string = DEFAULT_SEPARATOR,
 ): string[] | null {
   if (batch.singleton) {
-    const only = text.trim();
+    const only = tidy(text);
     return only.length > 0 ? [only] : null;
   }
 
   const core = separator.trim() || separator;
-  const parts = text.split(core).map((s) => s.trim());
+  const parts = text.split(core).map(tidy);
 
   // Only ever an edge separator, and only when it actually helps.
   while (parts.length > batch.tokens.length && parts[0] === '') parts.shift();
@@ -243,6 +266,22 @@ export function splitBatchResponse(
   if (parts.length !== batch.tokens.length) return null;
   if (parts.some((p) => p.length === 0)) return null;
   return parts;
+}
+
+/**
+ * Normalise one returned piece.
+ *
+ * Models are inconsistent about whitespace around delimiters and sometimes wrap
+ * long replies across lines. A word that comes back as "  pusta\n ka " and one
+ * that comes back as "pustaka" are the same answer, and treating the first as a
+ * mismatch would send a perfectly good batch into a needless bisection.
+ *
+ * Only whitespace is touched: runs of spaces, tabs and newlines collapse to a
+ * single space and the ends are trimmed. Nothing is added, removed or reordered,
+ * so a piece that genuinely disagrees with what was sent still disagrees.
+ */
+function tidy(piece: string): string {
+  return piece.replace(/\s+/g, ' ').trim();
 }
 
 /**

@@ -2,7 +2,8 @@ import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  LocalHinglishTransliterator, SarvamTransliterator, resolveTransliterator,
+  LocalHinglishTransliterator, KannadaRomanizer, SarvamTransliterator,
+  resolveTransliterator, offlineEngineFor,
 } from '../src/transliterate/providers.js';
 import { toRomanScript, romaniseTranscript } from '../src/transliterate/index.js';
 import { detectLanguage } from '../src/transliterate/detect.js';
@@ -122,10 +123,34 @@ describe('the Hindi engine is reserved for Devanagari languages', () => {
     }
   });
 
-  test('the capability table agrees — no Hindi engine for kn/te/ta/ml', () => {
-    assert.equal(providerSupports('local', 'hi'), true);
-    for (const lang of NON_DEVANAGARI) {
-      assert.equal(providerSupports('local', lang), false, `local must not cover ${lang}`);
+  test('"local" covers Kannada with its OWN engine, and te/ta/ml not at all', () => {
+    assert.equal(providerSupports('local', 'hi'), true, 'Devanagari engine');
+    assert.equal(providerSupports('local', 'kn'), true, 'Kannada engine');
+    for (const lang of ['te', 'ta', 'ml']) {
+      assert.equal(
+        providerSupports('local', lang), false,
+        `${lang} has no offline engine — it must not be claimed`,
+      );
+    }
+  });
+
+  test('offline routing picks the engine that implements the script', () => {
+    for (const lang of ['hi', 'mr', 'ne', 'sa', 'kok', 'mai']) {
+      assert.ok(
+        offlineEngineFor(lang) instanceof LocalHinglishTransliterator,
+        `${lang} must use the Devanagari engine`,
+      );
+    }
+    assert.ok(
+      offlineEngineFor('kn') instanceof KannadaRomanizer,
+      'Kannada must use the Kannada engine',
+    );
+    assert.ok(
+      !(offlineEngineFor('kn') instanceof LocalHinglishTransliterator),
+      'Kannada must NEVER be handed to the Devanagari engine',
+    );
+    for (const lang of ['te', 'ta', 'ml']) {
+      assert.equal(offlineEngineFor(lang), null, `${lang} has no offline engine`);
     }
   });
 
@@ -142,8 +167,8 @@ describe('the Hindi engine is reserved for Devanagari languages', () => {
     }
   });
 
-  test('resolving a non-Devanagari language with no model backend FAILS, never falls back to Hindi', () => {
-    for (const lang of NON_DEVANAGARI) {
+  test('a language with no offline engine FAILS with no key, never falls back to Hindi', () => {
+    for (const lang of ['te', 'ta', 'ml']) {
       assert.throws(
         () => resolveTransliterator(undefined, lang, noKey),
         (e: unknown) => {
@@ -154,6 +179,12 @@ describe('the Hindi engine is reserved for Devanagari languages', () => {
         `${lang} with no key must error, not quietly become Hinglish`,
       );
     }
+  });
+
+  test('Kannada with no key uses the Kannada engine, not an error and not Hindi', () => {
+    const p = resolveTransliterator(undefined, 'kn', noKey);
+    assert.ok(p instanceof KannadaRomanizer, 'Kannada now has its own offline engine');
+    assert.ok(!(p instanceof LocalHinglishTransliterator));
   });
 });
 

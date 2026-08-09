@@ -182,11 +182,15 @@ describe('detection: code-switching and edge cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('provider capability table', () => {
-  test('local covers Devanagari only', () => {
+  test('local covers Devanagari and Kannada — two separate engines', () => {
     assert.ok(providerSupports('local', 'hi'));
     assert.ok(providerSupports('local', 'mr'));
-    assert.equal(providerSupports('local', 'kn'), false);
-    assert.equal(providerSupports('local', 'ta'), false);
+    // Kannada has its own offline engine (kannada.ts). It is NOT the Devanagari
+    // engine stretched over another script — see roman-language-routing.test.ts,
+    // which fails if Kannada is ever handed to the Devanagari one.
+    assert.ok(providerSupports('local', 'kn'));
+    assert.equal(providerSupports('local', 'ta'), false, 'Tamil still has no offline engine');
+    assert.equal(providerSupports('local', 'te'), false, 'Telugu still has no offline engine');
   });
 
   test('sarvam covers the twelve Indic languages', () => {
@@ -212,7 +216,8 @@ describe('provider capability table', () => {
 
   test('providersFor ranks model backends ahead of rules', () => {
     assert.deepEqual(providersFor('hi'), ['sarvam', 'http', 'local']);
-    assert.deepEqual(providersFor('kn'), ['sarvam', 'http']);
+    assert.deepEqual(providersFor('kn'), ['sarvam', 'http', 'local']);
+    assert.deepEqual(providersFor('ta'), ['sarvam', 'http']);
   });
 
   test('region subtags resolve', () => {

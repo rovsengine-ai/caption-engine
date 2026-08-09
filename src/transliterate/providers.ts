@@ -1,9 +1,10 @@
 import { CaptionEngineError } from '../errors.js';
 import { transliterateToken, hasDevanagari } from './devanagari.js';
+import { transliterateKannadaToken, hasKannada } from './kannada.js';
 import { isIndicScript } from './script-utils.js';
 import {
   planBatches, splitBatchResponse, mapWithConcurrency, subdivide,
-  DEFAULT_MAX_BATCH_CHARS, DEFAULT_SEPARATOR, SARVAM_HARD_LIMIT,
+  DEFAULT_MAX_BATCH_CHARS, DEFAULT_MAX_BATCH_WORDS, DEFAULT_SEPARATOR, SARVAM_HARD_LIMIT,
   type TokenBatch,
 } from './batching.js';
 
@@ -81,6 +82,50 @@ export class LocalHinglishTransliterator implements TransliterationProvider {
 }
 
 /**
+ * Deterministic Kannada → Roman, implemented in src/transliterate/kannada.ts.
+ *
+ * A separate engine from the Devanagari one, not a configuration of it: Kannada
+ * keeps its inherent vowel where Hindi deletes it, so the two cannot share
+ * rules. Kannada previously had NO offline engine, which is what turned a single
+ * mis-delimited Sarvam batch into a dead render.
+ *
+ * Rule-based, so the same caveat as `local`: it cannot recover English spelling
+ * from English written in Kannada script. Lean on the glossary for those.
+ */
+export class KannadaRomanizer implements TransliterationProvider {
+  readonly name = 'kannada';
+  readonly description =
+    'built-in rule-based Kannada→Roman (offline, deterministic, LOWER QUALITY on English ' +
+    'written in Kannada script — relies on the glossary for those)';
+  readonly offline = true;
+  readonly quality = 'rules' as const;
+
+  supports(language: string): boolean {
+    return (language.split('-')[0] ?? '').toLowerCase() === 'kn';
+  }
+
+  async romanise(tokens: string[], _language: string): Promise<string[]> {
+    return tokens.map((t) => transliterateKannadaToken(t));
+  }
+}
+
+/**
+ * The offline engine for a language, or null when there isn't one.
+ *
+ * Routing lives HERE, in one place, so "which rules romanise this language" has
+ * exactly one answer. The alternative — every caller reaching for
+ * `LocalHinglishTransliterator` and hoping — is how Kannada would end up in
+ * Devanagari rules, which fails silently rather than loudly.
+ */
+export function offlineEngineFor(language: string): TransliterationProvider | null {
+  const devanagari = new LocalHinglishTransliterator();
+  if (devanagari.supports(language)) return devanagari;
+  const kannada = new KannadaRomanizer();
+  if (kannada.supports(language)) return kannada;
+  return null;
+}
+
+/**
  * No-op "provider": returns every token exactly as it arrived.
  *
  * This is NOT a transliterator and must never be selected by `--transliterate`.
@@ -135,6 +180,11 @@ export interface SarvamOptions {
   baseUrl?: string;
   /** Hard cap on `body.input`, in UTF-16 code units. Must stay under 1000. */
   maxChars?: number;
+  /**
+   * Hard cap on words per request. Independent of `maxChars` because alignment
+   * risk tracks the number of delimiters, not the number of characters.
+   */
+  maxWords?: number;
   /** Requests in flight. Kept low on purpose; these APIs rate-limit. */
   concurrency?: number;
   /** Transport attempts per batch, including the first. */
@@ -231,6 +281,7 @@ export class SarvamTransliterator implements TransliterationProvider {
 
   private readonly baseUrl: string;
   private readonly maxChars: number;
+  private readonly maxWords: number;
   private readonly concurrency: number;
   private readonly maxAttempts: number;
   private readonly baseDelayMs: number;
@@ -250,6 +301,7 @@ export class SarvamTransliterator implements TransliterationProvider {
     const o: SarvamOptions = typeof opts === 'string' ? { baseUrl: opts } : opts;
     this.baseUrl = o.baseUrl ?? 'https://api.sarvam.ai';
     this.maxChars = Math.min(o.maxChars ?? DEFAULT_MAX_BATCH_CHARS, SARVAM_HARD_LIMIT - 1);
+    this.maxWords = Math.max(1, o.maxWords ?? DEFAULT_MAX_BATCH_WORDS);
     this.concurrency = Math.max(1, o.concurrency ?? 3);
     this.maxAttempts = Math.max(1, o.maxAttempts ?? 3);
     this.baseDelayMs = o.baseDelayMs ?? 400;
@@ -266,11 +318,10 @@ export class SarvamTransliterator implements TransliterationProvider {
     return ['hi', 'mr', 'ne', 'te', 'kn', 'ta', 'ml', 'bn', 'gu', 'pa', 'or', 'as'].includes(base);
   }
 
-  /** Offline engine for a failed batch, when it covers this language. */
+  /** Offline engine for a failed batch, when one covers this language. */
   private resolveFallback(language: string): TransliterationProvider | null {
     if (this.fallbackOverride !== undefined) return this.fallbackOverride;
-    const local = new LocalHinglishTransliterator();
-    return local.supports(language) ? local : null;
+    return offlineEngineFor(language);
   }
 
   async romanise(tokens: string[], language: string): Promise<string[]> {
@@ -288,7 +339,9 @@ export class SarvamTransliterator implements TransliterationProvider {
     this.stats.tokensPreserved = tokens.length - sendTokens.length;
     if (sendTokens.length === 0) return out;
 
-    const batches = planBatches(sendTokens, sendIndices, { maxChars: this.maxChars });
+    const batches = planBatches(sendTokens, sendIndices, {
+      maxChars: this.maxChars, maxWords: this.maxWords,
+    });
     this.stats.batches = batches.length;
     this.stats.largestInputChars = batches.reduce((m, b) => Math.max(m, b.input.length), 0);
 
@@ -814,11 +867,14 @@ export function resolveTransliterator(
 
   switch (chosen) {
     case 'local': {
-      const p = new LocalHinglishTransliterator();
-      if (!p.supports(language)) {
+      // "local" means "the built-in engine for THIS language" — Devanagari
+      // rules for hi/mr/ne/sa/kok/mai, Kannada rules for kn. Never one engine
+      // pressed into service for a script it does not implement.
+      const p = offlineEngineFor(language);
+      if (!p) {
         throw new CaptionEngineError(
-          `Roman output requested for "${language}", but the built-in transliterator only ` +
-            `covers Devanagari languages (hi, mr, ne).`,
+          `Roman output requested for "${language}", but the built-in transliterators only ` +
+            `cover Devanagari languages (hi, mr, ne, sa, kok, mai) and Kannada (kn).`,
           `Options:\n` +
             `  • Use a model backend that covers ${language}:\n` +
             `      export SARVAM_API_KEY=...\n` +
@@ -848,6 +904,7 @@ export function resolveTransliterator(
       return new SarvamTransliterator(key, {
         baseUrl: env.SARVAM_BASE_URL,
         maxChars: positiveInt(env.SARVAM_MAX_INPUT_CHARS),
+        maxWords: positiveInt(env.SARVAM_MAX_WORDS_PER_BATCH),
         concurrency: positiveInt(env.SARVAM_CONCURRENCY),
         maxAttempts: positiveInt(env.SARVAM_MAX_ATTEMPTS),
         maxSubdivisionRequests: positiveIntOrZero(env.SARVAM_MAX_SUBDIVISION_REQUESTS),

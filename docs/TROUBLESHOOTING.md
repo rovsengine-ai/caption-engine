@@ -155,9 +155,21 @@ has to split back into the same number of pieces. Long batches give the model ma
 delimiters to get wrong. The reply cannot be matched to word timings, so it is discarded —
 that part is correct and deliberate.
 
-The batch is now retried once, then **bisected** into smaller requests down to one word
-each, which cannot be mis-split. If you still see this error, the model is failing on
-individual words:
+Three things now stand between that and a failed render:
+
+1. **Smaller requests up front.** Batches are capped at 25 words as well as 900 characters,
+   so there are far fewer delimiters per request to get wrong. `SARVAM_MAX_WORDS_PER_BATCH`
+   overrides it.
+2. **Bounded retry, then bisection.** One re-roll of the same request, then the batch is
+   split in half and asked again, recursively, down to one word per request — which carries
+   no delimiter and cannot be mis-split. Capped at 48 extra requests per batch
+   (`SARVAM_MAX_SUBDIVISION_REQUESTS`; `0` disables).
+3. **Offline rules for the language, if there are any.** `hi/mr/ne/sa/kok/mai` use the
+   Devanagari engine; `kn` uses the Kannada engine. Kannada is never routed through Hindi
+   rules — those are different engines with different vowel behaviour.
+
+If you still see this error, the model is failing on individual words in a language with no
+offline engine (`te ta ml bn gu pa or as`):
 
 ```bash
 # keep only the unrescuable words in their original script, and be told which
@@ -168,12 +180,14 @@ export TRANSLITERATE_URL=https://your-service/transliterate
 --roman-fallback http
 ```
 
-Bisection costs extra API requests, capped at 48 per batch. Change it with
-`SARVAM_MAX_SUBDIVISION_REQUESTS`; `0` disables it.
+`--roman-fallback native` keeps **only the words that could not be romanised** in their
+original script, romanises everything else, keeps every timestamp exactly where it was, and
+carries on rendering the video. It prints a warning naming the affected batches, so a
+partially-native caption track is never something that quietly happened to you.
 
-For `hi`, `mr` and `ne` this rarely surfaces at all — the offline engine covers those, so
-an unalignable batch quietly falls back to rules. It is `kn te ta ml bn gu pa or as` that
-have no offline engine.
+It works for every language: Hindi falls back to Devanagari, Kannada to Kannada, Telugu to
+Telugu, Tamil to Tamil, Malayalam to Malayalam. The program prefers accurate native-script
+captions over incorrect Roman ones.
 
 ### Captions are out of sync with speech
 

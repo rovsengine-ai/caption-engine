@@ -417,7 +417,19 @@ Fallback:          native  (the "local" transliterator does not cover "kn")
 
 #### Kannada, Telugu, Tamil and the rest: the Sarvam-only languages
 
-`kn te ta ml bn gu pa or as` have **no offline transliterator** — Sarvam is the only
+**Kannada now has an offline engine.** `src/transliterate/kannada.ts` romanises Kannada
+with its own rules — deterministic, no key, no network. It is a separate engine from the
+Devanagari one, not a configuration of it: Kannada keeps its inherent vowel where Hindi
+deletes it (`ಪುಸ್ತಕ` → `pustaka`, never `pustak`), so the two cannot share rules. That
+absence of schwa deletion is also what makes Kannada tractable offline.
+
+So the error above no longer kills a Kannada render: a batch Sarvam cannot align now
+degrades to offline Kannada rules. It is rule-based, so it cannot recover English spelling
+from English written in Kannada script — add glossary entries for those — and it has not
+been through native-speaker review. It is a fallback that keeps a render accurate and
+readable, not a replacement for the model backend.
+
+`te ta ml bn gu pa or as` still have **no offline transliterator** — Sarvam is the only
 backend. Sarvam occasionally returns a different number of tokens than the words sent in a
 batch. That output cannot be aligned to word timings, so it is discarded; the strict check
 never bends. Previously there was nothing to fall back to and the whole render died on one
@@ -434,6 +446,12 @@ pipe-delimited request and the reply has to split back into exactly the same num
 pieces. 62 words means 61 delimiters the model has to preserve; the more words per request,
 the likelier one gets merged, dropped or invented. Re-sending the identical request — the
 old retry — mostly re-rolls the same dice.
+
+**Smaller requests, first.** Batches are now capped at **25 words** as well as 900
+characters. The character budget alone optimised the wrong quantity: alignment risk tracks
+the *number of delimiters*, not the number of characters, so a character-only budget packed
+short-word languages — Kannada, Telugu, Tamil, Malayalam — the most densely, which is
+exactly where alignment fails most. Tune with `SARVAM_MAX_WORDS_PER_BATCH`.
 
 **What happens now.** After the one cheap retry, the batch is **bisected** and asked again
 in smaller requests, recursively. A single-word request carries no delimiter at all, so its
@@ -481,6 +499,29 @@ romanisation — and the report names them:
 `--roman-fallback http` now applies to this case too. It previously only influenced which
 backend was *chosen*, so when Sarvam was picked and then failed mid-run, the flag the error
 message recommended had no effect on the failure it was being recommended for.
+
+#### The order of preference, and why
+
+When romanisation is in trouble the engine always prefers, in this order:
+
+1. **model output that aligns** — the best answer;
+2. **offline rules for that language** — Devanagari for `hi/mr/ne/sa/kok/mai`, Kannada for
+   `kn`. Lower quality on English loanwords, but correct;
+3. **the original script**, via `--roman-fallback native` — accurate, just not Roman;
+4. **an error**.
+
+What it will never do is produce Roman captions it cannot stand behind. Mismatched output
+is discarded rather than padded, truncated or paired up with timings by guesswork, because
+a caption track that drifts out of sync looks fine to whoever renders it and is useless to
+whoever watches it. **Accurate native-script captions beat incorrect Roman ones**, and both
+beat a silent failure — which is why `--roman-fallback native` prints:
+
+```
+! SOME OUTPUT IS STILL IN THE ORIGINAL SCRIPT despite --script roman.
+  Batch(es) 3 kept native script.
+```
+
+The render continues and the video is produced either way.
 
 Word count, word order and every timestamp are unchanged either way. English Latin tokens
 are never sent to the API and come back byte-identical.

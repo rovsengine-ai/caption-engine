@@ -23,10 +23,16 @@ export interface ProviderCapability {
 }
 
 /**
- * Devanagari only, and genuinely so: the engine implements Hindi schwa
- * deletion, not a character table, so it cannot be pointed at another script.
+ * Languages with a built-in offline engine.
+ *
+ * These are TWO separate engines, not one engine covering six scripts:
+ * `devanagari.ts` implements Hindi schwa deletion and cannot be pointed at
+ * another script, and `kannada.ts` implements Kannada, which keeps its inherent
+ * vowel and therefore needs different rules entirely. `--transliterate local`
+ * picks whichever one matches the language; there is no shared code path where
+ * Kannada could end up in Devanagari rules.
  */
-const LOCAL_LANGUAGES = ['hi', 'mr', 'ne', 'sa', 'kok', 'mai'];
+const LOCAL_LANGUAGES = ['hi', 'mr', 'ne', 'sa', 'kok', 'mai', 'kn'];
 
 /**
  * Sarvam's documented set. Kept here rather than inferred, so an unsupported
@@ -40,7 +46,7 @@ export const CAPABILITIES: Record<TransliteratorName, ProviderCapability> = {
     languages: LOCAL_LANGUAGES,
     offline: true,
     needs: null,
-    description: 'built-in rules, Devanagari only, deterministic and free',
+    description: 'built-in rules, Devanagari + Kannada, deterministic and free',
   },
   sarvam: {
     name: 'sarvam',

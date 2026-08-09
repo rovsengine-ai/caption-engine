@@ -15,8 +15,15 @@ import { mkTranscript } from './helpers.js';
  * The failure that motivated this file: Sarvam sometimes returns a different
  * number of pieces than the number of Kannada words sent in a batch. The
  * response cannot be aligned to word timings, so it is discarded — correctly.
- * But Kannada has no offline transliterator, so there was nothing to fall back
+ * Kannada then had no offline transliterator, so there was nothing to fall back
  * to and the whole render died on one bad batch.
+ *
+ * Kannada NOW HAS an offline engine (src/transliterate/kannada.ts), so that
+ * exact death no longer happens: a mismatched batch degrades to offline Kannada
+ * rules instead. The no-engine path still exists for te/ta/ml, and the tests
+ * that exercise it say so explicitly by passing `fallback: null` — which is the
+ * honest way to test "there is nothing to fall back to" now that, for Kannada,
+ * there is.
  *
  * The rule that must never bend: mismatched output is NEVER forced onto
  * timestamps. Everything here is about what happens afterwards.
@@ -73,16 +80,37 @@ function kn(extra: Record<string, unknown> = {}): SarvamTransliterator {
   return new SarvamTransliterator('test-key', { sleep: noSleep, ...extra });
 }
 
+/**
+ * Sarvam with NO offline engine behind it — what te/ta/ml genuinely look like,
+ * and what Kannada used to look like. Explicit, so the tests below cannot start
+ * silently passing because some engine appeared.
+ */
+function noEngine(extra: Record<string, unknown> = {}): SarvamTransliterator {
+  return new SarvamTransliterator('test-key', { sleep: noSleep, fallback: null, ...extra });
+}
+
 // ---------------------------------------------------------------------------
 
 describe('the strict check never bends', () => {
   test('a mismatched batch is refused rather than aligned', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
     await assert.rejects(
-      () => kn().romanise(KANNADA, 'kn'),
+      () => noEngine().romanise(KANNADA, 'kn'),
       (e: unknown) => e instanceof CaptionEngineError && /no offline transliterator/.test(String((e as Error).message)),
       'a token-count mismatch with no fallback must fail loudly',
     );
+  });
+
+  test('with the Kannada engine available, a mismatch degrades instead of dying', async () => {
+    fake = fakeSarvam({ breakBatch: () => true });
+    const out = await kn().romanise(KANNADA, 'kn');
+
+    assert.equal(out.length, KANNADA.length, 'word count preserved');
+    assert.deepEqual(
+      out, ['idu', 'ondu', 'pustaka', 'mattu', 'pennu', 'ide'],
+      'the offline Kannada engine romanised them — NOT the discarded API output',
+    );
+    assert.ok(out.every((t) => !t.startsWith('R')), 'the mismatched API reply was discarded');
   });
 
   test('it retries once, then bisects, before giving up', async () => {
@@ -91,7 +119,7 @@ describe('the strict check never bends', () => {
     // the effort: one cheap re-roll of the same request, then progressively
     // smaller requests, and only then the fallback policy.
     fake = fakeSarvam({ breakBatch: () => true });
-    const p = kn({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     await p.romanise(KANNADA, 'kn');
 
     assert.equal(p.stats.retries, 1, 'exactly one re-roll of the identical request');
@@ -112,7 +140,7 @@ describe('the strict check never bends', () => {
 
   test('bisection is bounded — a hopeless batch cannot become a request storm', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const p = kn({ allowNativeFallback: true, maxSubdivisionRequests: 3 });
+    const p = noEngine({ allowNativeFallback: true, maxSubdivisionRequests: 3 });
     const out = await p.romanise(KANNADA, 'kn');
 
     assert.ok(p.stats.subdivisionRequests <= 3, 'the budget is a hard ceiling');
@@ -122,7 +150,7 @@ describe('the strict check never bends', () => {
 
   test('subdivision can be switched off entirely', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const p = kn({ allowNativeFallback: true, maxSubdivisionRequests: 0 });
+    const p = noEngine({ allowNativeFallback: true, maxSubdivisionRequests: 0 });
     await p.romanise(KANNADA, 'kn');
 
     assert.equal(fake.calls.length, 2, 'just the request and its retry');
@@ -131,7 +159,7 @@ describe('the strict check never bends', () => {
 
   test('output length always equals input length, whatever happened', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const out = await kn({ allowNativeFallback: true }).romanise(KANNADA, 'kn');
+    const out = await noEngine({ allowNativeFallback: true }).romanise(KANNADA, 'kn');
     assert.equal(out.length, KANNADA.length);
   });
 });
@@ -139,14 +167,14 @@ describe('the strict check never bends', () => {
 describe('--roman-fallback native', () => {
   test('a failed Kannada batch keeps its original script instead of dying', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const p = kn({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     const out = await p.romanise(KANNADA, 'kn');
     assert.deepEqual(out, KANNADA, 'the words should come back untouched, not mangled');
   });
 
   test('the affected batch is NAMED, not just counted', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const p = kn({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     await p.romanise(KANNADA, 'kn');
     assert.deepEqual(p.stats.nativeBatches, [1]);
     assert.equal(p.stats.tokensViaNative, KANNADA.length);
@@ -156,7 +184,7 @@ describe('--roman-fallback native', () => {
 
   test('the reason is recorded, not just the fact', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const p = kn({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     await p.romanise(KANNADA, 'kn');
     assert.ok(p.stats.notes.some((n) => /token count/i.test(n)));
   });
@@ -165,7 +193,7 @@ describe('--roman-fallback native', () => {
     // Two batches; break only the one containing the marker word.
     const words = [...KANNADA, 'ಮಾರ್ಕರ್', ...KANNADA];
     fake = fakeSarvam({ breakBatch: (input) => input.includes('ಮಾರ್ಕರ್') });
-    const p = kn({ allowNativeFallback: true, maxChars: 40 });
+    const p = noEngine({ allowNativeFallback: true, maxChars: 40 });
     const out = await p.romanise(words, 'kn');
 
     assert.equal(out.length, words.length);
@@ -177,7 +205,7 @@ describe('--roman-fallback native', () => {
 
   test('a successful run reports no native fallback at all', async () => {
     fake = fakeSarvam();
-    const p = kn({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     await p.romanise(KANNADA, 'kn');
     assert.equal(p.stats.tokensViaNative, 0);
     assert.deepEqual(p.stats.nativeBatches, []);
@@ -238,7 +266,7 @@ describe('timestamps and word order survive the fallback', () => {
     fake = fakeSarvam({ breakBatch: () => true });
     const before = t.words.map((w) => ({ text: w.text, s: w.start, e: w.end }));
 
-    const r = await romaniseTranscript(t, kn({ allowNativeFallback: true }), { language: 'kn' });
+    const r = await romaniseTranscript(t, noEngine({ allowNativeFallback: true }), { language: 'kn' });
 
     assert.equal(r.transcript.words.length, before.length);
     r.transcript.words.forEach((w, i) => {
@@ -250,27 +278,30 @@ describe('timestamps and word order survive the fallback', () => {
 
   test('the result flags that output is still native', async () => {
     fake = fakeSarvam({ breakBatch: () => true });
-    const r = await romaniseTranscript(t, kn({ allowNativeFallback: true }), { language: 'kn' });
+    const r = await romaniseTranscript(t, noEngine({ allowNativeFallback: true }), { language: 'kn' });
     assert.equal(r.keptNativeScript, true, 'the caller must be able to detect this');
   });
 
   test('a fully successful Kannada run does NOT flag native script', async () => {
     fake = fakeSarvam();
-    const r = await romaniseTranscript(t, kn({ allowNativeFallback: true }), { language: 'kn' });
+    const r = await romaniseTranscript(t, noEngine({ allowNativeFallback: true }), { language: 'kn' });
     assert.equal(r.keptNativeScript, false);
   });
 });
 
 describe('fallback policy selection', () => {
-  const t = mkTranscript([['ಇದು', 0.2, 0.6], ['ಒಂದು', 0.7, 1.1]], 'kn');
+  // Telugu, not Kannada: Kannada now HAS an offline engine, so it is no longer
+  // an example of "no backend covers this language". Telugu still is, and the
+  // policy logic being tested is language-agnostic.
+  const t = mkTranscript([['ఇది', 0.2, 0.6], ['ఒక', 0.7, 1.1]], 'te');
   const noKeyEnv = {} as NodeJS.ProcessEnv;
 
-  test('error (default) refuses when no backend covers Kannada', async () => {
+  test('error (default) refuses when no backend covers the language', async () => {
     await assert.rejects(
-      () => toRomanScript(t, { language: 'kn', provider: 'local', env: noKeyEnv }),
+      () => toRomanScript(t, { language: 'te', provider: 'local', env: noKeyEnv }),
       (e: unknown) => {
         const msg = String((e as Error).message);
-        assert.match(msg, /"kn"/, 'the error must name the language');
+        assert.match(msg, /"te"/, 'the error must name the language');
         return e instanceof CaptionEngineError;
       },
     );
@@ -278,32 +309,32 @@ describe('fallback policy selection', () => {
 
   test('native keeps the original script and says so', async () => {
     const r = await toRomanScript(t, {
-      language: 'kn', provider: 'local', env: noKeyEnv, fallback: 'native',
+      language: 'te', provider: 'local', env: noKeyEnv, fallback: 'native',
     });
     assert.equal(r.fallbackUsed, 'native');
     assert.equal(r.keptNativeScript, true);
     assert.ok(r.fallbackReason && r.fallbackReason.length > 0, 'a reason must accompany the fallback');
-    assert.deepEqual(r.transcript.words.map((w) => w.text), ['ಇದು', 'ಒಂದು']);
+    assert.deepEqual(r.transcript.words.map((w) => w.text), ['ఇది', 'ఒక']);
   });
 
   test('native does not relabel the output as roman', async () => {
     // Claiming script:'roman' while returning Kannada would make the lie
     // machine-readable as well as visible.
     const r = await toRomanScript(t, {
-      language: 'kn', provider: 'local', env: noKeyEnv, fallback: 'native',
+      language: 'te', provider: 'local', env: noKeyEnv, fallback: 'native',
     });
-    assert.notEqual(r.transcript.words[0]!.text, 'Idu');
+    assert.notEqual(r.transcript.words[0]!.text, 'Idi');
   });
 
   test('http uses TRANSLITERATE_URL', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async () => new Response(
       // The documented endpoint contract: one token per input, in order.
-      JSON.stringify({ tokens: ['Idu', 'ondu'] }), { status: 200 },
+      JSON.stringify({ tokens: ['Idi', 'oka'] }), { status: 200 },
     )) as unknown as typeof fetch;
     try {
       const r = await toRomanScript(t, {
-        language: 'kn', provider: 'local', fallback: 'http',
+        language: 'te', provider: 'local', fallback: 'http',
         env: { TRANSLITERATE_URL: 'https://example.invalid/x' } as NodeJS.ProcessEnv,
       });
       assert.equal(r.fallbackUsed, 'http');
@@ -313,7 +344,7 @@ describe('fallback policy selection', () => {
 
   test('http without TRANSLITERATE_URL fails with instructions, never silently', async () => {
     await assert.rejects(
-      () => toRomanScript(t, { language: 'kn', provider: 'local', env: noKeyEnv, fallback: 'http' }),
+      () => toRomanScript(t, { language: 'te', provider: 'local', env: noKeyEnv, fallback: 'http' }),
       /TRANSLITERATE_URL is not set/,
     );
   });

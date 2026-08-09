@@ -130,10 +130,21 @@ const noSleep = async (): Promise<void> => {};
 let fake: Fake | null = null;
 afterEach(() => { fake?.restore(); fake = null; });
 
+/**
+ * Sarvam configured the way the production run was: no word cap, so all 62
+ * words go out as ONE request. That is the shape the bug report describes, and
+ * pinning it here keeps the regression reproducible now that the default caps
+ * words per batch and would otherwise split it up before the bug can happen.
+ */
 function sarvam(extra: Record<string, unknown> = {}): SarvamTransliterator {
   return new SarvamTransliterator('test-key', {
-    baseUrl: SARVAM_HOST, sleep: noSleep, ...extra,
+    baseUrl: SARVAM_HOST, sleep: noSleep, maxWords: 1000, ...extra,
   });
+}
+
+/** No offline engine behind it — te/ta/ml, and Kannada before it had one. */
+function noEngine(extra: Record<string, unknown> = {}): SarvamTransliterator {
+  return sarvam({ fallback: null, ...extra });
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +169,21 @@ describe('the reported failure: 62 Kannada words, batch 1 of 1', () => {
     await p.romanise(SIXTY_TWO, 'kn');
     assert.equal(p.stats.batches, 1, 'batch 1 of 1, exactly as in the report');
     assert.deepEqual(p.stats.subdividedBatches, [1]);
+  });
+
+  test('the default word cap would have split it up before it could fail', async () => {
+    // Requirement 1, measured rather than asserted in prose: the same 62 words
+    // under default settings never form a single 62-word request, so the
+    // mismatch has far fewer delimiters to go wrong on in the first place.
+    fake = fakeApi({ breaksAt: (n) => n > 8 });
+    const p = new SarvamTransliterator('test-key', { baseUrl: SARVAM_HOST, sleep: noSleep });
+    await p.romanise(SIXTY_TWO, 'kn');
+
+    assert.ok(p.stats.batches > 1, 'the word cap must split a 62-word run');
+    assert.ok(
+      fake.sarvamCalls.every((c) => c.split('|').length <= 25),
+      'no request may exceed the word cap',
+    );
   });
 
   test('word ORDER survives the bisection', async () => {
@@ -257,7 +283,7 @@ describe('the strict alignment check is unchanged', () => {
   test('an empty reply does not silently leave words in Kannada', async () => {
     fake = fakeApi({ emptyReply: () => true });
     await assert.rejects(
-      () => sarvam().romanise(SIXTY_TWO.slice(0, 6), 'kn'),
+      () => noEngine().romanise(SIXTY_TWO.slice(0, 6), 'kn'),
       (e: unknown) => e instanceof CaptionEngineError
         && /no offline transliterator/.test((e as Error).message),
       'an empty reply must fail loudly, not pass as success',
@@ -288,7 +314,7 @@ describe('what happens to words bisection genuinely cannot rescue', () => {
   test('error (the default) refuses, and explains what was already tried', async () => {
     fake = fakeApi(hopeless);
     await assert.rejects(
-      () => sarvam().romanise(SIXTY_TWO.slice(0, 6), 'kn'),
+      () => noEngine().romanise(SIXTY_TWO.slice(0, 6), 'kn'),
       (e: unknown) => {
         const err = e as CaptionEngineError & { hint?: string };
         assert.ok(e instanceof CaptionEngineError);
@@ -308,7 +334,7 @@ describe('what happens to words bisection genuinely cannot rescue', () => {
     const words = SIXTY_TWO.slice(0, 12);
     const bad = words[7]!;
     fake = fakeApi({ poison: bad });
-    const p = sarvam({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     const out = await p.romanise(words, 'kn');
 
     assert.equal(out.length, words.length, 'word count preserved');
@@ -323,7 +349,7 @@ describe('what happens to words bisection genuinely cannot rescue', () => {
   test('native reports every word it left in Kannada', async () => {
     fake = fakeApi(hopeless);
     const words = SIXTY_TWO.slice(0, 6);
-    const p = sarvam({ allowNativeFallback: true });
+    const p = noEngine({ allowNativeFallback: true });
     const out = await p.romanise(words, 'kn');
 
     assert.deepEqual(out, words, 'untouched, not mangled');
@@ -382,5 +408,124 @@ describe('what happens to words bisection genuinely cannot rescue', () => {
     assert.equal(r.fallbackUsed, null);
     assert.equal(r.keptNativeScript, false);
     assert.equal(r.batching?.subdividedBatches.length, 0, 'nothing needed bisecting');
+  });
+});
+
+describe('reply shapes the aligner must survive', () => {
+  const three = (): ReturnType<typeof planBatches>[number] =>
+    planBatches(['ಇದು', 'ಒಂದು', 'ಪುಸ್ತಕ'])[0]!;
+
+  test('too FEW pieces is a mismatch', () => {
+    assert.equal(splitBatchResponse('idu | ondu', three()), null);
+  });
+
+  test('too MANY pieces is a mismatch', () => {
+    assert.equal(splitBatchResponse('idu | ondu | pusta | ka', three()), null);
+  });
+
+  test('an empty reply is a mismatch', () => {
+    assert.equal(splitBatchResponse('', three()), null);
+    assert.equal(splitBatchResponse('   ', three()), null);
+  });
+
+  test('multiple spaces around the delimiter are fine', () => {
+    assert.deepEqual(
+      splitBatchResponse('idu    |     ondu   |  pustaka', three()),
+      ['idu', 'ondu', 'pustaka'],
+    );
+  });
+
+  test('line breaks in the reply are fine', () => {
+    assert.deepEqual(
+      splitBatchResponse('idu |\nondu |\r\n pustaka', three()),
+      ['idu', 'ondu', 'pustaka'],
+    );
+  });
+
+  test('whitespace INSIDE a piece is collapsed, not treated as a failure', () => {
+    assert.deepEqual(
+      splitBatchResponse('idu | on  du | pusta\nka', three()),
+      ['idu', 'on du', 'pusta ka'],
+    );
+  });
+
+  test('a piece that came back empty is still a mismatch', () => {
+    assert.equal(splitBatchResponse('idu |  | pustaka', three()), null);
+  });
+
+  test('numbers and symbols never leave the machine, so they cannot desync', async () => {
+    fake = fakeApi({ breaksAt: (n) => n > 2 });
+    const tokens = ['ಇದು', '2024', '50%', '₹500', 'ಒಂದು', '#reels'];
+    const out = await sarvam().romanise(tokens, 'kn');
+
+    assert.equal(out.length, tokens.length);
+    assert.deepEqual(
+      [out[1], out[2], out[3], out[5]], ['2024', '50%', '₹500', '#reels'],
+      'non-Indic tokens must come back byte-identical',
+    );
+    for (const sent of fake.sarvamCalls) {
+      assert.ok(!sent.includes('2024'), 'digits must not be sent');
+      assert.ok(!sent.includes('#reels'), 'symbols must not be sent');
+    }
+  });
+
+  test('a compound Kannada word is never split across requests', async () => {
+    const compound = 'ಕರ್ನಾಟಕರಾಜ್ಯೋತ್ಸವಸಂಭ್ರಮಾಚರಣೆ';
+    fake = fakeApi();
+    const out = await sarvam({ maxChars: 60 }).romanise([compound, ...SIXTY_TWO.slice(0, 4)], 'kn');
+
+    assert.equal(out.length, 5);
+    const carrying = fake.sarvamCalls.filter((c) => c.includes(compound));
+    assert.ok(carrying.length > 0, 'the compound must actually have been sent');
+    for (const c of carrying) {
+      assert.ok(c.includes(compound), 'and it must appear whole in its request');
+    }
+  });
+});
+
+describe('native fallback works for EVERY detected language', () => {
+  // Whatever the language, if romanisation genuinely fails the captions stay in
+  // THAT language's own script — never Devanagari for a Tamil video, and never
+  // Roman guesswork for any of them.
+  const WORDS: Record<string, string[]> = {
+    hi: ['यह', 'एक', 'किताब'],
+    kn: ['ಇದು', 'ಒಂದು', 'ಪುಸ್ತಕ'],
+    te: ['ఇది', 'ఒక', 'పుస్తకం'],
+    ta: ['இது', 'ஒரு', 'புத்தகம்'],
+    ml: ['ഇത്', 'ഒരു', 'പുസ്തകം'],
+  };
+
+  for (const [lang, words] of Object.entries(WORDS)) {
+    test(`${lang} keeps its own script, with timings intact`, async () => {
+      fake = fakeApi({ breaksAt: () => true });
+      const t = mkTranscript(
+        words.map((w, i) => [w, i * 0.5, i * 0.5 + 0.4] as [string, number, number]),
+        lang,
+      );
+      const before = t.words.map((w) => ({ text: w.text, s: w.start, e: w.end }));
+
+      // No offline engine behind it, so the native policy is the only option
+      // left — which is exactly the situation the flag exists for.
+      const r = await romaniseTranscript(
+        t, noEngine({ allowNativeFallback: true }), { language: lang },
+      );
+
+      assert.equal(r.transcript.words.length, before.length, `${lang} word count`);
+      r.transcript.words.forEach((w, i) => {
+        assert.equal(w.text, before[i]!.text, `${lang} word ${i} must keep its own script`);
+        assert.equal(w.start, before[i]!.s, `${lang} word ${i} start moved`);
+        assert.equal(w.end, before[i]!.e, `${lang} word ${i} end moved`);
+      });
+      assert.equal(r.keptNativeScript, true, `${lang} must report that it stayed native`);
+      assert.equal(r.transcript.language, lang, 'the source language must not change');
+    });
+  }
+
+  test('Kannada prefers its offline engine over going native', async () => {
+    // Same failure, with the Kannada engine available: accurate Roman Kannada
+    // beats native script, and both beat a wrong guess.
+    fake = fakeApi({ breaksAt: () => true });
+    const out = await sarvam({ allowNativeFallback: true }).romanise(WORDS.kn!, 'kn');
+    assert.deepEqual(out, ['idu', 'ondu', 'pustaka']);
   });
 });
