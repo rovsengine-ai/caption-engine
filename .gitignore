@@ -60,3 +60,9 @@ memcheck.mjs
 resvgtest.mjs
 scratch/
 .gitignore.save
+
+# Source media dropped in the repo root. Anchored to the root so a legitimate
+# path like src/input-handler.ts is never caught. Covers extensionless files
+# (an "input2" with no .mp4 suffix slipped past the media rules above).
+/input*
+.git-deltest
