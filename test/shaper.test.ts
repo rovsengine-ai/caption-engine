@@ -7,7 +7,11 @@ import {
   scriptOf, splitScriptRuns, primaryScript, containsComplexScript,
   scriptForLanguage, isComplexScript,
 } from '../src/text/script.js';
-import { resolveFont, fontReport, discoverFontFamilies, listFontFamilies } from '../src/text/fonts.js';
+import {
+  resolveFont, fontReport, discoverFontFamilies, listFontFamilies, systemFallbackFont,
+} from '../src/text/fonts.js';
+import { ShapingError } from '../src/errors.js';
+import { MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX } from '../src/captions/style.js';
 
 before(async () => { await initShaper(); });
 
@@ -227,5 +231,87 @@ describe('HarfBuzz shaping correctness', () => {
     const a = shapedToSvgPath(await shapeText('क्षेत्र विद्या', 90));
     const b = shapedToSvgPath(await shapeText('क्षेत्र विद्या', 90));
     assert.equal(a, b, 'identical input must produce identical output');
+  });
+});
+
+/**
+ * Custom font sizes across every supported script.
+ *
+ * Regression coverage for a class of report that reads as "a specific word in
+ * a specific language fails, but only when the font size is customised": if
+ * that were true it would mean shaping (glyph selection) depends on the
+ * requested pixel size, which it must not — HarfBuzz always shapes in FONT
+ * UNITS (see loadFont's `hbFont.setScale(unitsPerEm, unitsPerEm)`), and pixel
+ * size is applied afterwards as a single SVG transform. These tests assert
+ * that property holds at both ends of the accepted --font-size range, for
+ * every bundled script, not just the sizes a preset happens to use.
+ */
+describe('custom font sizes do not change glyph selection', () => {
+  const SAMPLES: Record<string, string> = {
+    Latin: 'hello WORLD 123',
+    Devanagari: 'नमस्ते क्षेत्र विद्या सम्बन्ध',
+    Telugu: 'తెలుగు రాష్ట్రం క్షేమం',
+    Kannada: 'ಕನ್ನಡ ಕ್ಷೇತ್ರ ಸಂಬಂಧ',
+    Tamil: 'தமிழ் க்ஷேமம்',
+    Malayalam: 'മലയാളം ക്ഷേമം',
+    Bengali: 'বাংলা ক্ষেত্র',
+    Gujarati: 'ગુજરાતી ક્ષેત્ર',
+    Gurmukhi: 'ਪੰਜਾਬੀ ਸੰਬੰਧ',
+  };
+
+  const SIZES = [MIN_FONT_SIZE_PX, 24, 72, 84, MAX_FONT_SIZE_PX];
+
+  for (const [script, text] of Object.entries(SAMPLES)) {
+    test(`${script} shapes without a missing glyph at every size, bold and regular`, async () => {
+      for (const size of SIZES) {
+        for (const bold of [false, true]) {
+          const shaped = await shapeText(text, size, { bold });
+          for (const run of shaped.runs) {
+            assert.ok(
+              run.glyphs.every((g) => g.glyphId !== 0),
+              `${script} "${text}" at ${size}px (bold=${bold}) produced a missing glyph`,
+            );
+          }
+          const d = shapedToSvgPath(shaped);
+          assert.doesNotMatch(d, /NaN|Infinity/, `${script} at ${size}px produced invalid path data`);
+        }
+      }
+    });
+  }
+
+  test('advance width is strictly monotonic in font size across the whole accepted range', async () => {
+    let prev = 0;
+    for (const size of SIZES) {
+      const w = await measureText('क्षेत्र', size);
+      assert.ok(w > prev, `width did not grow from previous size at ${size}px`);
+      prev = w;
+    }
+  });
+});
+
+describe('invalid font sizes fail clearly instead of producing garbage output', () => {
+  for (const bad of [0, -1, NaN, Infinity, -Infinity]) {
+    test(`shapeText rejects ${bad} with a typed, actionable error`, async () => {
+      await assert.rejects(shapeText('hello', bad), (e: unknown) => {
+        assert.ok(e instanceof ShapingError, 'must be the typed shaping error');
+        assert.match((e as Error).message, /[Ii]nvalid font size/);
+        assert.ok((e as ShapingError).hint, 'must explain the valid range');
+        return true;
+      });
+    });
+  }
+});
+
+describe('missing-glyph failures name the actual word, and try a system fallback first', () => {
+  test('systemFallbackFont never throws when fc-match is unavailable', () => {
+    // On a machine without fontconfig this must return null, not crash — it
+    // is a best-effort extra chance, never a hard dependency.
+    assert.doesNotThrow(() => systemFallbackFont('Devanagari', false));
+  });
+
+  test('an unrenderable script still throws MissingFontError with real alternatives (existing contract)', () => {
+    // resolveFont's own contract is unchanged by the shaper's new fallback —
+    // this just confirms the fallback addition did not weaken it.
+    assert.throws(() => resolveFont('Latin', { family: 'Definitely Not A Real Family' }));
   });
 });

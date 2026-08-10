@@ -28,9 +28,18 @@
     "",
     "FONTS: tone-driven font switching works, but only fonts present in",
     "assets/fonts are selectable. The shipped theme therefore varies weight, scale",
-    "and colour only. Add Inter/Poppins/Anton/etc. and set fontFamily per tone."
+    "and colour only. Add Inter/Poppins/Anton/etc. and set fontFamily per tone.",
+    "",
+    "motion: kinetic-captions defaults (version 2+). Entirely optional and only",
+    "  ever consulted when --motion is not none.",
+    "  template       default --animation-template (a name from",
+    "                 `caption-engine --help`, under --animation-template).",
+    "  intensity      default --motion-intensity, 0..1.",
+    "  toneTemplates  per-tone template choice for --animation-template auto.",
+    "An explicit --animation-template/--motion-intensity on the command line",
+    "always wins over these."
   ],
-  "version": 1,
+  "version": 2,
   "minConfidence": 0.6,
   "tones": {
     "neutral": {},
@@ -70,5 +79,17 @@
     "fastRate": 3.2,
     "fastEnergy": 0.25,
     "emphaticEnergy": 0.65
+  },
+  "motion": {
+    "template": "smooth-rise",
+    "intensity": 0.45,
+    "toneTemplates": {
+      "excited": "punch",
+      "emphatic": "comic-hit",
+      "fast": "beat-sync",
+      "soft": "cinematic-fade",
+      "calm": "minimal-reveal",
+      "neutral": "smooth-rise"
+    }
   }
 }

@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CaptionEngineError } from '../errors.js';
 import type { Tone } from '../media/prosody.js';
+import { assertValidAnimationTemplateName } from './animation.js';
 
 /**
  * Tone → visual style, loaded from config/caption-theme.json.
@@ -75,6 +76,20 @@ export const DEFAULT_THRESHOLDS: ClassifierThresholds = {
   emphaticEnergy: 0.65,
 };
 
+/**
+ * Optional kinetic-captions defaults. Entirely additive — a theme with no
+ * "motion" section behaves exactly as it did before this existed, and
+ * everything here is only ever consulted when `--motion` is not `none`.
+ */
+export interface MotionTheme {
+  /** Default --animation-template when the CLI flag is not given. */
+  template?: string;
+  /** Default --motion-intensity when the CLI flag is not given. */
+  intensity?: number;
+  /** Per-tone template choice for `--animation-template auto`. */
+  toneTemplates?: Partial<Record<Tone, string>>;
+}
+
 export interface CaptionTheme {
   version: number;
   /** Below this classification confidence, a word or cue keeps the base style. */
@@ -84,6 +99,8 @@ export interface CaptionTheme {
   active?: ActiveOverrides;
   /** Classifier tuning. Merged over DEFAULT_THRESHOLDS. */
   thresholds: ClassifierThresholds;
+  /** Kinetic-captions defaults. Absent = built-in template defaults apply. */
+  motion?: MotionTheme;
   /** Where it came from, for diagnostics. */
   source: string;
 }
@@ -215,12 +232,71 @@ export function parseCaptionTheme(text: string, source: string): CaptionTheme {
     (thresholds as unknown as Record<string, number>)[key] = value;
   }
 
+  // Motion is entirely optional and additive — a theme written before this
+  // existed (or one that simply never mentions it) parses identically to
+  // before, and `--motion none` never even looks at this section.
+  const motionIn = obj.motion as Record<string, unknown> | undefined;
+  let motion: MotionTheme | undefined;
+  if (motionIn && typeof motionIn === 'object') {
+    motion = {};
+    if (motionIn.template !== undefined) {
+      if (typeof motionIn.template !== 'string') {
+        throw new CaptionEngineError(
+          `Caption theme ${source}: motion.template must be a string.`,
+          `Got: ${JSON.stringify(motionIn.template)}`,
+        );
+      }
+      assertValidAnimationTemplateName(motionIn.template);
+      motion.template = motionIn.template;
+    }
+    if (motionIn.intensity !== undefined) {
+      if (typeof motionIn.intensity !== 'number' || !Number.isFinite(motionIn.intensity) ||
+        motionIn.intensity < 0 || motionIn.intensity > 1) {
+        throw new CaptionEngineError(
+          `Caption theme ${source}: motion.intensity must be a number between 0 and 1.`,
+          `Got: ${JSON.stringify(motionIn.intensity)}`,
+        );
+      }
+      motion.intensity = motionIn.intensity;
+    }
+    const toneTemplatesIn = motionIn.toneTemplates as Record<string, unknown> | undefined;
+    if (toneTemplatesIn && typeof toneTemplatesIn === 'object') {
+      const toneTemplates: Partial<Record<Tone, string>> = {};
+      for (const [name, value] of Object.entries(toneTemplatesIn)) {
+        if (!VALID_TONES.includes(name as Tone)) {
+          throw new CaptionEngineError(
+            `Caption theme ${source} has an unknown tone "${name}" under motion.toneTemplates.`,
+            `Valid tones: ${VALID_TONES.join(', ')}.`,
+          );
+        }
+        if (typeof value !== 'string') {
+          throw new CaptionEngineError(
+            `Caption theme ${source}: motion.toneTemplates.${name} must name a template as a string.`,
+            `Got: ${JSON.stringify(value)}`,
+          );
+        }
+        assertValidAnimationTemplateName(value);
+        toneTemplates[name as Tone] = value;
+      }
+      motion.toneTemplates = toneTemplates;
+    }
+    for (const key of Object.keys(motionIn)) {
+      if (key !== 'template' && key !== 'intensity' && key !== 'toneTemplates') {
+        throw new CaptionEngineError(
+          `Caption theme ${source} has an unknown field "motion.${key}".`,
+          'Valid motion fields: template, intensity, toneTemplates.',
+        );
+      }
+    }
+  }
+
   return {
     version: typeof obj.version === 'number' ? obj.version : 1,
     minConfidence,
     tones,
     ...(Object.keys(active).length > 0 ? { active } : {}),
     thresholds,
+    ...(motion ? { motion } : {}),
     source,
   };
 }

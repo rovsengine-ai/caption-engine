@@ -1,7 +1,8 @@
 import opentype from 'opentype.js';
-import { resolveFont, fontDataFor, discoverFontFamilies, type ResolvedFont } from './fonts.js';
+import { resolveFont, fontDataFor, discoverFontFamilies, systemFallbackFont, type ResolvedFont } from './fonts.js';
 import { splitScriptRuns, isRtlScript, type ScriptName } from './script.js';
 import { ShapingError } from '../errors.js';
+import { MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX } from '../captions/style.js';
 
 /**
  * Text shaping via HarfBuzz (WASM), glyph outlines via opentype.js.
@@ -119,6 +120,37 @@ export interface ShapedText {
   fontSize: number;
 }
 
+/** Shape `text` with an already-loaded font. Returns null if any glyph is missing (.notdef). */
+async function tryShapeWith(
+  H: HbModule, handles: FontHandles, text: string,
+): Promise<{ glyphs: ShapedGlyph[]; width: number } | null> {
+  const buf = new (H as any).Buffer();
+  buf.addText(text);
+  buf.guessSegmentProperties();
+  (H as any).shape(handles.hbFont, buf);
+  const infos = buf.getGlyphInfos();
+  const positions = buf.getGlyphPositions();
+  const glyphs: ShapedGlyph[] = [];
+  let penX = 0;
+  let penY = 0;
+  for (let i = 0; i < infos.length; i++) {
+    const info = infos[i];
+    const pos = positions[i];
+    glyphs.push({
+      glyphId: info.codepoint,
+      x: penX + (pos.xOffset ?? 0),
+      y: penY + (pos.yOffset ?? 0),
+      xAdvance: pos.xAdvance ?? 0,
+      cluster: info.cluster ?? 0,
+    });
+    penX += pos.xAdvance ?? 0;
+    penY += pos.yAdvance ?? 0;
+  }
+  if (typeof buf.destroy === 'function') buf.destroy();
+  if (glyphs.some((g) => g.glyphId === 0)) return null;
+  return { glyphs, width: penX };
+}
+
 /** Shape one single-script run. */
 async function shapeRun(
   text: string,
@@ -152,38 +184,30 @@ async function shapeRun(
     }
   }
 
+  // Last resort: ask the system's font database directly. It may know about a
+  // face this module never walked into during its own directory scan — the
+  // fix for a rare conjunct/nukta cluster that none of the DISCOVERED faces
+  // cover, even though some installed font on the machine does.
+  const systemFallback = systemFallbackFont(script, opts.bold ?? false);
+  if (systemFallback && !candidates.some((c) => c.path === systemFallback.path)) {
+    candidates.push(systemFallback);
+  }
+
   for (const font of candidates) {
     const handles = await loadFont(font);
-    const buf = new (H as any).Buffer();
-    buf.addText(text);
-    buf.guessSegmentProperties();
-    (H as any).shape(handles.hbFont, buf);
-    const infos = buf.getGlyphInfos();
-    const positions = buf.getGlyphPositions();
-    const glyphs: ShapedGlyph[] = [];
-    let penX = 0;
-    let penY = 0;
-    for (let i = 0; i < infos.length; i++) {
-      const info = infos[i];
-      const pos = positions[i];
-      glyphs.push({
-        glyphId: info.codepoint,
-        x: penX + (pos.xOffset ?? 0),
-        y: penY + (pos.yOffset ?? 0),
-        xAdvance: pos.xAdvance ?? 0,
-        cluster: info.cluster ?? 0,
-      });
-      penX += pos.xAdvance ?? 0;
-      penY += pos.yAdvance ?? 0;
-    }
-    if (typeof buf.destroy === 'function') buf.destroy();
-    if (!glyphs.some((g) => g.glyphId === 0)) {
-      return { glyphs, script, font, handles, width: penX };
-    }
+    const shaped = await tryShapeWith(H, handles, text);
+    if (shaped) return { glyphs: shaped.glyphs, script, font, handles, width: shaped.width };
   }
+
+  // Name the actual word (bounded, so a pathological run doesn't blow up the
+  // message) so this is a report a user can act on, not just a script name.
+  const snippet = text.length > 40 ? `${text.slice(0, 40)}…` : text;
   throw new ShapingError(
-    `No discovered font can render this ${script} text without missing glyphs.`,
-    `Add a .ttf or .otf with ${script} coverage to assets/fonts or FONT_DIR.`,
+    `Could not render the ${script} text "${snippet}" — no available font has every glyph it needs.`,
+    `This is usually a rare character combination (a conjunct, nukta, or ligature) that the ` +
+      `bundled Noto fonts and any system fonts found don't cover.\n` +
+      `Add a .ttf or .otf with ${script} coverage to assets/fonts or FONT_DIR, then re-run:\n` +
+      `  node dist/src/cli.js doctor`,
   );
 }
 
@@ -196,6 +220,16 @@ export async function shapeText(
   fontSize: number,
   opts: { bold?: boolean; fontPath?: string; fontFamily?: string } = {},
 ): Promise<ShapedText> {
+  // Fail fast and clearly here, before an invalid size reaches HarfBuzz/SVG
+  // path scaling — where the same bad value shows up many steps later as an
+  // opaque native-module failure with no obvious connection to "font size".
+  if (!Number.isFinite(fontSize) || fontSize <= 0) {
+    throw new ShapingError(
+      `Invalid font size: ${fontSize}. Font size must be a positive, finite number of pixels.`,
+      `Valid range is ${MIN_FONT_SIZE_PX}-${MAX_FONT_SIZE_PX}px. If this came from ` +
+        `--font-size, check the value passed on the command line.`,
+    );
+  }
   const runs = splitScriptRuns(text);
   if (runs.length === 0) {
     return { runs: [], width: 0, ascent: fontSize * 0.8, descent: fontSize * 0.2, fontSize };

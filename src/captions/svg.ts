@@ -3,6 +3,10 @@ import { shapeText, shapedToSvgRuns, type ShapedText } from '../text/shaper.js';
 import { primaryScript, isRtlScript } from '../text/script.js';
 import { activeWordWindows, resolveWordStyle } from './active.js';
 import type { ToneStyle } from './tone-style.js';
+import {
+  type AnimationTemplate, type FrameMotion, type WordMotionState, type DecorationSpec,
+  planMotionSlices, resolveWordMotion, resolveCueEdgeMotion, effectiveMaxScale,
+} from './animation.js';
 
 /**
  * Caption rendering as SVG, using pre-shaped vector outlines.
@@ -41,6 +45,22 @@ export interface SvgRenderOptions {
    * render byte-identical.
    */
   toneStyles?: ReadonlyMap<number, ToneStyle>;
+  /**
+   * Kinetic captions: the template/intensity active for this ENTIRE render.
+   * Fixed for the whole render (never per-frame) because it feeds reservedWidth
+   * (below) — a value that changed frame to frame would make the layout itself
+   * jitter, which is exactly the bug reservedWidth exists to prevent. Absent
+   * (the default) reproduces pre-animation output exactly: no reservation
+   * change, no transform, nothing rendered differently.
+   */
+  motion?: { template: AnimationTemplate; intensity: number };
+  /**
+   * Where THIS SPECIFIC FRAME sits within the motion timeline — varies frame to
+   * frame, unlike `motion` above. Comes from `CaptionFramePlan.motion`, set by
+   * `planCaptionFrames`. Absent means "render the settled/static state",
+   * which is also what happens when `motion` itself is absent.
+   */
+  frameMotion?: FrameMotion;
 }
 
 interface LaidOutWord {
@@ -105,6 +125,10 @@ export async function layoutCue(
   const fontSize = style.fontSizePx;
   const maxWidth = width * 0.86; // side margins
   const baseSp = await spaceWidth(fontSize, bold);
+  // Fixed for the whole render (see SvgRenderOptions.motion) — the peak an
+  // animated word can EVER scale to, so its reserved slot never runs out
+  // mid-animation regardless of which frame is being generated.
+  const motionMaxScale = opts.motion ? effectiveMaxScale(opts.motion.template, opts.motion.intensity) : 1;
 
   const shapedWords: LaidOutWord[] = [];
   for (let i = 0; i < cue.words.length; i++) {
@@ -125,7 +149,12 @@ export async function layoutCue(
     // jumping as the highlight moves across it.
     const restingWidth = shaped.width * resting.scale;
     const activeWidth = await measureForActive(text, fontSize, active);
-    const reservedWidth = Math.max(restingWidth, activeWidth);
+    // The third term covers a kinetic entrance/emphasis overshoot (e.g. "pop"
+    // templates scale past their settled size before easing back) — without
+    // it an animated word could momentarily exceed the space every OTHER
+    // frame of the cue already reserved for it, which is the sideways-jump
+    // this whole mechanism exists to prevent.
+    const reservedWidth = Math.max(restingWidth, activeWidth, restingWidth * motionMaxScale);
     shapedWords.push({ word: w, index: i, shaped, x: 0, width: shaped.width, reservedWidth });
   }
 
@@ -193,6 +222,15 @@ function esc(s: string): string {
  * word's outline paints over the previous word's fill wherever they overlap,
  * which is visible on tight kerning and looks like corrupted glyphs.
  */
+let clipIdCounter = 0;
+
+/**
+ * Kinetic captions render entirely as extra structure ADDED to this function —
+ * `defs`/`decorations` stay empty arrays and `cueAttrs` stays `''` whenever
+ * `opts.motion` is absent, which is what makes `--motion none` produce the
+ * exact same SVG string this function has always produced (see the guard on
+ * `motionActive` below). Nothing about the no-motion path changed.
+ */
 export async function renderCueSvg(
   cue: CaptionCue,
   opts: SvgRenderOptions,
@@ -202,8 +240,27 @@ export async function renderCueSvg(
   const activeScale = opts.activeScale ?? 1;
   const lines = await layoutCue(cue, opts);
 
+  const motionActive = Boolean(opts.motion);
+  const template = opts.motion?.template;
+  const frameMotion = opts.frameMotion;
+
   const outlines: string[] = [];
   const fills: string[] = [];
+  const decorations: string[] = [];
+  const defs: string[] = [];
+
+  // Cue-level entrance/exit: a single fade/slide applied uniformly to
+  // everything in this frame. Resolved once, reused for the decoration,
+  // outline and fill groups below.
+  let cueAttrs = '';
+  if (motionActive && template && frameMotion?.cueEdge) {
+    const cueMotion = resolveCueEdgeMotion(template, frameMotion.cueEdge, frameMotion.cueProgress ?? 1, frameMotion.intensity);
+    const dyPx = cueMotion.translateYFrac * style.fontSizePx;
+    const parts: string[] = [];
+    if (dyPx !== 0) parts.push(`transform="translate(0,${dyPx.toFixed(2)})"`);
+    if (cueMotion.opacity !== 1) parts.push(`opacity="${cueMotion.opacity.toFixed(3)}"`);
+    if (parts.length > 0) cueAttrs = ` ${parts.join(' ')}`;
+  }
 
   for (const line of lines) {
     for (const lw of line.words) {
@@ -230,16 +287,72 @@ export async function renderCueSvg(
       if (runs.length === 0) continue;
       const colour = finalStyle.color;
 
-      // Word-level placement. Scaling the active word happens about its own
-      // centre so it grows in place rather than drifting right.
-      const left = lw.x + (lw.reservedWidth - shaped.width) / 2;
-      let wordTransform = `translate(${left.toFixed(2)},${line.y.toFixed(2)})`;
-      if (finalStyle.scale !== 1) {
+      // Kinetic per-word transform — active word only, and only while motion
+      // is on. `wordMotion` is undefined for every other word and every
+      // non-motion render, which is what keeps them on the plain path below.
+      const wordMotion: WordMotionState | undefined =
+        motionActive && isActive && template && frameMotion
+          ? resolveWordMotion(template, frameMotion)
+          : undefined;
+      const extraScale = wordMotion?.scale ?? 1;
+      const dxPx = (wordMotion?.translateXFrac ?? 0) * style.fontSizePx;
+      const dyPx = (wordMotion?.translateYFrac ?? 0) * style.fontSizePx;
+
+      // Word-level placement. Scaling happens about the word's own centre so
+      // it grows in place rather than drifting right.
+      const left = lw.x + (lw.reservedWidth - shaped.width) / 2 + dxPx;
+      const baselineY = line.y + dyPx;
+      const totalScale = finalStyle.scale * extraScale;
+      let wordTransform = `translate(${left.toFixed(2)},${baselineY.toFixed(2)})`;
+      if (totalScale !== 1) {
         const cx = shaped.width / 2;
         wordTransform =
-          `translate(${(left + cx).toFixed(2)},${line.y.toFixed(2)}) ` +
-          `scale(${finalStyle.scale}) translate(${(-cx).toFixed(2)},0)`;
+          `translate(${(left + cx).toFixed(2)},${baselineY.toFixed(2)}) ` +
+          `scale(${totalScale}) translate(${(-cx).toFixed(2)},0)`;
       }
+
+      // Decoration + clip geometry, in the same absolute coordinate system
+      // the glyph paths are drawn in (see runTransform below) — computed once
+      // per word rather than per run, since every run of a word shares it.
+      const wordWidthPx = shaped.width * totalScale;
+      const decoBox = wordMotion
+        ? {
+            x: left - wordWidthPx * 0.06,
+            y: baselineY - shaped.ascent * totalScale - shaped.ascent * 0.08,
+            width: wordWidthPx * 1.12,
+            height: (shaped.ascent + shaped.descent) * totalScale * 1.18,
+          }
+        : null;
+
+      if (wordMotion?.decoration.backplate && decoBox) {
+        const rx = Math.min(decoBox.height / 2.4, decoBox.width / 6);
+        decorations.push(
+          `<rect x="${decoBox.x.toFixed(1)}" y="${decoBox.y.toFixed(1)}" ` +
+            `width="${decoBox.width.toFixed(1)}" height="${decoBox.height.toFixed(1)}" ` +
+            `rx="${rx.toFixed(1)}" fill="${esc(style.outlineColor)}" opacity="0.82"/>`,
+        );
+      }
+      if (wordMotion?.decoration.underline && decoBox) {
+        const uy = baselineY + shaped.descent * totalScale * 0.55;
+        decorations.push(
+          `<rect x="${decoBox.x.toFixed(1)}" y="${uy.toFixed(1)}" ` +
+            `width="${decoBox.width.toFixed(1)}" height="${Math.max(2, style.outlineWidthPx * 0.6).toFixed(1)}" ` +
+            `rx="2" fill="${esc(colour)}"/>`,
+        );
+      }
+
+      let clipId: string | null = null;
+      if (wordMotion?.revealFrac !== undefined && decoBox) {
+        clipId = `ce-reveal-${clipIdCounter++}`;
+        const clipW = Math.max(0, decoBox.width * wordMotion.revealFrac);
+        defs.push(
+          `<clipPath id="${clipId}"><rect x="${decoBox.x.toFixed(1)}" y="${decoBox.y.toFixed(1)}" ` +
+            `width="${clipW.toFixed(1)}" height="${decoBox.height.toFixed(1)}"/></clipPath>`,
+        );
+      }
+
+      const wordOutlineParts: string[] = [];
+      const wordFillParts: string[] = [];
 
       for (const r of runs) {
         // Path data is in FONT UNITS; this transform carries it to pixels.
@@ -249,29 +362,77 @@ export async function renderCueSvg(
         const runTransform =
           `${wordTransform} translate(${r.originX.toFixed(3)},0) scale(${r.scale.toFixed(6)})`;
 
+        if (wordMotion?.decoration.glow) {
+          // Approximated with wider, low-opacity duplicate strokes rather than
+          // an SVG <filter> Gaussian blur — resvg's filter support was not
+          // verified for this project, and a stroke-based glow needs no
+          // filter at all, so it works on every rasteriser this project
+          // supports without a runtime capability check.
+          const glowW = (style.outlineWidthPx * 5) / r.scale;
+          decorations.push(
+            `<path d="${r.d}" transform="${runTransform}" fill="none" ` +
+              `stroke="${esc(colour)}" stroke-width="${glowW.toFixed(1)}" ` +
+              `stroke-linejoin="round" stroke-linecap="round" opacity="0.28"/>`,
+          );
+        }
+        if (wordMotion?.decoration.shadow) {
+          decorations.push(
+            `<path d="${r.d}" transform="translate(3,3) ${runTransform}" fill="#000000" opacity="0.35"/>`,
+          );
+        }
+
         if (style.outlineWidthPx > 0) {
           // stroke-width is in the LOCAL (font-unit) system, so convert.
           const sw = (style.outlineWidthPx * 2) / r.scale;
-          outlines.push(
+          wordOutlineParts.push(
             `<path d="${r.d}" transform="${runTransform}" fill="none" ` +
               `stroke="${esc(style.outlineColor)}" stroke-width="${sw.toFixed(1)}" ` +
               `stroke-linejoin="round" stroke-linecap="round"/>`,
           );
         }
-        fills.push(`<path d="${r.d}" transform="${runTransform}" fill="${esc(colour)}"/>`);
+
+        if (wordMotion?.sweepFrac !== undefined && decoBox) {
+          // Karaoke sweep: the RESTING colour paints the whole glyph first,
+          // then the active colour is painted again on top, clipped to the
+          // swept fraction — a progressive fill, without re-shaping anything.
+          const sweepId = `ce-sweep-${clipIdCounter++}`;
+          const sweepW = Math.max(0, decoBox.width * wordMotion.sweepFrac);
+          defs.push(
+            `<clipPath id="${sweepId}"><rect x="${decoBox.x.toFixed(1)}" y="${decoBox.y.toFixed(1)}" ` +
+              `width="${sweepW.toFixed(1)}" height="${decoBox.height.toFixed(1)}"/></clipPath>`,
+          );
+          wordFillParts.push(`<path d="${r.d}" transform="${runTransform}" fill="${esc(resting.color)}"/>`);
+          wordFillParts.push(
+            `<g clip-path="url(#${sweepId})"><path d="${r.d}" transform="${runTransform}" fill="${esc(colour)}"/></g>`,
+          );
+        } else {
+          wordFillParts.push(`<path d="${r.d}" transform="${runTransform}" fill="${esc(colour)}"/>`);
+        }
       }
+
+      const wrapOpacity = wordMotion && wordMotion.opacity !== 1 ? wordMotion.opacity : undefined;
+      const wrapClip = clipId ? ` clip-path="url(#${clipId})"` : '';
+      const wrapOpacityAttr = wrapOpacity !== undefined ? ` opacity="${wrapOpacity.toFixed(3)}"` : '';
+      const needsWrap = wrapClip !== '' || wrapOpacityAttr !== '';
+
+      outlines.push(needsWrap ? `<g${wrapClip}${wrapOpacityAttr}>${wordOutlineParts.join('')}</g>` : wordOutlineParts.join(''));
+      fills.push(needsWrap ? `<g${wrapClip}${wrapOpacityAttr}>${wordFillParts.join('')}</g>` : wordFillParts.join(''));
     }
   }
 
   const bg = opts.background
     ? `<rect width="100%" height="100%" fill="${esc(opts.background)}"/>`
     : '';
+  const defsBlock = defs.length > 0 ? `<defs>${defs.join('')}</defs>` : '';
+  const decorBlock = decorations.length > 0 ? `<g${cueAttrs}>${decorations.join('')}</g>` : '';
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
     `viewBox="0 0 ${width} ${height}">` +
+    defsBlock +
     bg +
-    `<g>${outlines.join('')}</g><g>${fills.join('')}</g>` +
+    decorBlock +
+    `<g${cueAttrs}>${outlines.join('')}</g><g${cueAttrs}>${fills.join('')}</g>` +
     `</svg>`
   );
 }
@@ -294,6 +455,8 @@ export interface CaptionFramePlan {
   /** Frame size the SVG will declare. The rasteriser verifies its output matches. */
   width: number;
   height: number;
+  /** Set only when kinetic captions are enabled; absent reproduces pre-animation frame plans exactly. */
+  motion?: FrameMotion;
 }
 
 export interface CaptionFrame extends CaptionFramePlan {
@@ -307,41 +470,95 @@ export interface CaptionFrame extends CaptionFramePlan {
  * clamped to the cue and to each other so no two overlap — overlapping overlays
  * would double-draw and produce visibly heavier text.
  */
+export interface PlanCaptionFramesOptions {
+  width: number;
+  height: number;
+  highlight: 'active-word' | 'none';
+  /**
+   * Kinetic captions. Absent, or intensity 0, reproduces the exact frame plan
+   * this function has always produced — no extra frames, no `motion` field on
+   * any of them. This is what makes `--motion none` byte-identical to the
+   * pre-animation renderer rather than merely "close".
+   */
+  motion?: { template: AnimationTemplate; intensity: number };
+  /**
+   * Cue-local words classified as strong, high-confidence emphasis, as
+   * `"${cueIndex}:${wordIndex}"` keys — computed by the caller from the SAME
+   * prosody data already used for tone styling (see src/cli/run.ts), so
+   * "emphasis" here always means the identical thing --prosody already
+   * decided, never a second, disagreeing classification.
+   */
+  emphasisWords?: ReadonlySet<string>;
+}
+
 export function planCaptionFrames(
   cues: CaptionCue[],
-  opts: { width: number; height: number; highlight: 'active-word' | 'none' },
+  opts: PlanCaptionFramesOptions,
 ): CaptionFramePlan[] {
   const plans: CaptionFramePlan[] = [];
   const dims = { width: opts.width, height: opts.height };
+  const cueByIndex = new Map(cues.map((c) => [c.index, c] as const));
+  // Which plan is first/last WITHIN ITS CUE, tracked in cue-local build order
+  // (not the later global time-sort) so it is correct even if two cues'
+  // frames end up interleaved or a plan gets clamped to zero length below.
+  const cueFirst = new Map<number, CaptionFramePlan>();
+  const cueLast = new Map<number, CaptionFramePlan>();
 
   for (const cue of cues) {
+    const cuePlans: CaptionFramePlan[] = [];
     if (opts.highlight === 'none' || cue.words.length === 0) {
-      plans.push({
-        start: cue.start, end: cue.end,
-        cueIndex: cue.index, activeWordIndex: -1, ...dims,
-      });
-      continue;
+      cuePlans.push({ start: cue.start, end: cue.end, cueIndex: cue.index, activeWordIndex: -1, ...dims });
+    } else {
+      // Lead-in before the first word starts, so the cue doesn't pop in mid-word.
+      const first = cue.words[0]!;
+      if (first.start > cue.start + 0.02) {
+        cuePlans.push({ start: cue.start, end: first.start, cueIndex: cue.index, activeWordIndex: -1, ...dims });
+      }
+      for (const active of activeWordWindows(cue)) {
+        cuePlans.push({ start: active.start, end: active.end, cueIndex: cue.index, activeWordIndex: active.index, ...dims });
+      }
     }
-
-    // Lead-in before the first word starts, so the cue doesn't pop in mid-word.
-    const first = cue.words[0]!;
-    if (first.start > cue.start + 0.02) {
-      plans.push({
-        start: cue.start, end: first.start,
-        cueIndex: cue.index, activeWordIndex: -1, ...dims,
-      });
+    if (cuePlans.length > 0) {
+      cueFirst.set(cue.index, cuePlans[0]!);
+      cueLast.set(cue.index, cuePlans[cuePlans.length - 1]!);
     }
-
-    for (const active of activeWordWindows(cue)) {
-      plans.push({ start: active.start, end: active.end, cueIndex: cue.index, activeWordIndex: active.index, ...dims });
-    }
+    plans.push(...cuePlans);
   }
 
   plans.sort((a, b) => a.start - b.start);
   for (let i = 0; i < plans.length - 1; i++) {
     if (plans[i]!.end > plans[i + 1]!.start) plans[i]!.end = plans[i + 1]!.start;
   }
-  return plans.filter((f) => f.end - f.start > 0.001);
+  const trimmed = plans.filter((f) => f.end - f.start > 0.001);
+
+  if (!opts.motion || opts.motion.intensity <= 0) return trimmed;
+
+  // ---- Kinetic expansion: subdivide entrance/hold/exit windows into extra,
+  // ---- motion-tagged frames. Everything above this line is untouched by
+  // ---- --motion, which is the guarantee that makes --motion none exact. ----
+  const { template, intensity } = opts.motion;
+  const out: CaptionFramePlan[] = [];
+  for (const p of trimmed) {
+    const isWord = p.activeWordIndex !== -1;
+    const cue = cueByIndex.get(p.cueIndex);
+    const wordText = isWord ? cue?.words[p.activeWordIndex]?.text ?? '' : '';
+    const emphasis = isWord && (opts.emphasisWords?.has(`${p.cueIndex}:${p.activeWordIndex}`) ?? false);
+    const slices = planMotionSlices(p.end - p.start, {
+      template, intensity, isWord, wordIndex: p.activeWordIndex, wordText,
+      isCueFirst: cueFirst.get(p.cueIndex) === p, isCueLast: cueLast.get(p.cueIndex) === p,
+      emphasis,
+    });
+    if (slices.length === 0) { out.push(p); continue; }
+    for (const s of slices) {
+      out.push({
+        start: Number((p.start + s.offsetStart).toFixed(4)),
+        end: Number((p.start + s.offsetEnd).toFixed(4)),
+        cueIndex: p.cueIndex, activeWordIndex: p.activeWordIndex, width: p.width, height: p.height,
+        motion: s.motion,
+      });
+    }
+  }
+  return out.filter((f) => f.end - f.start > 0.0001);
 }
 
 async function measureForActive(
@@ -374,6 +591,7 @@ export async function renderPlannedFrame(
     ...opts,
     activeWordIndex: plan.activeWordIndex,
     ...(forCue ? { toneStyles: forCue } : {}),
+    ...(plan.motion ? { frameMotion: plan.motion } : {}),
   });
 }
 
@@ -386,7 +604,7 @@ export async function renderPlannedFrame(
  */
 export async function buildCaptionFrames(
   cues: CaptionCue[],
-  opts: SvgRenderOptions & { highlight: 'active-word' | 'none' },
+  opts: SvgRenderOptions & { highlight: 'active-word' | 'none'; emphasisWords?: ReadonlySet<string> },
 ): Promise<CaptionFrame[]> {
   const plans = planCaptionFrames(cues, opts);
   const frames: CaptionFrame[] = [];

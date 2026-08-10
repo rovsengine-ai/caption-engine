@@ -394,6 +394,25 @@ export function resolveFont(
   );
 }
 
+/**
+ * Last-resort, NON-THROWING system lookup for a script.
+ *
+ * `resolveFont` already tries fontconfig for the SINGLE font it selects up
+ * front. The shaper's per-run fallback loop (src/text/shaper.ts) only tries
+ * the families this module already discovered on disk — so a word containing
+ * a glyph cluster none of THOSE faces cover (a rare conjunct, nukta, or
+ * ligature combination) fails even when some other system-installed font
+ * would have rendered it. This gives the shaper one more thing to try before
+ * it gives up on that word. Returns null rather than throwing — the caller
+ * decides what "no more options" means.
+ */
+export function systemFallbackFont(script: ScriptName, bold: boolean): ResolvedFont | null {
+  const family = script === 'Latin' ? 'Noto Sans' : `Noto Sans ${script}`;
+  const path = fcMatch(bold ? `${family}:bold` : family) ?? fcMatch(family);
+  if (!path) return null;
+  return { path, script, bold, source: 'fontconfig' };
+}
+
 export function fontDataFor(f: ResolvedFont): Buffer {
   return readFileSync(f.path);
 }

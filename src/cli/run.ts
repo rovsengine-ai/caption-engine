@@ -25,7 +25,10 @@ import { resolveWordStyle } from '../captions/active.js';
 import { groupIntoCues } from '../captions/group.js';
 import { buildAss, buildSrt } from '../captions/ass.js';
 import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
-import { resolveStyle, resolveOutput } from '../captions/style.js';
+import { resolveStyle, resolveOutput, STYLE_DEFAULT_ANIMATION_TEMPLATE } from '../captions/style.js';
+import {
+  ANIMATION_TEMPLATES, resolveIntensity, resolveAnimationTemplateName,
+} from '../captions/animation.js';
 import { renderVideo } from '../render/pipeline.js';
 import { initShaper } from '../text/shaper.js';
 import { listFontFamilies } from '../text/fonts.js';
@@ -898,6 +901,14 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   let prosody: ProsodyAnalysis | null = null;
   let theme = NEUTRAL_THEME;
   let toneStylesByCue: Map<number, Map<number, ToneStyle>> | undefined;
+  // Cue-local "cueIndex:wordIndex" keys for words classified as strong,
+  // high-confidence emphasis — the SAME gate (theme.minConfidence) that
+  // decides whether a tone applies at all, so kinetic "emphasis" behavior
+  // never fires on a word the tone system itself was not confident about.
+  // Stays empty without --prosody: motion still works, it just never
+  // singles out an emphasis word.
+  const emphasisWords = new Set<string>();
+  let videoTone: ReturnType<typeof dominantTone> = null;
 
   if (opts.prosody) {
     log.step('Analysing local audio prosody (loudness + F0 pitch)');
@@ -958,6 +969,16 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
         const forCue = new Map<number, ToneStyle>();
 
+        // Independent of --tone-scope: emphasis describes whether THIS word
+        // was spoken with strong delivery, which is a per-word fact whether
+        // or not the visible STYLING is per-word or per-line.
+        cue.words.forEach((word, i) => {
+          const p = byTime.get(`${word.start}:${word.end}`);
+          if (p && (p.tone === 'excited' || p.tone === 'emphatic') && p.confidence >= theme.minConfidence) {
+            emphasisWords.add(`${cue.index}:${i}`);
+          }
+        });
+
         if (opts.toneScope === 'cue') {
           // One tone for the whole line. The line carries the mood; the active
           // word carries the beat. Giving both jobs to the same per-word signal
@@ -990,6 +1011,12 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
 
         if (forCue.size > 0) toneStylesByCue.set(cue.index, forCue);
       }
+
+      // The video's OVERALL delivery, for `--animation-template auto`. A
+      // single template is resolved for the whole render (see the comment at
+      // the `resolveStyle` call below) — this is what it reacts to, distinct
+      // from the per-cue/per-word tone that already drives colour/scale.
+      videoTone = dominantTone(prosody.words, { minConfidence: theme.minConfidence });
 
       if (opts.toneScope === 'cue') {
         const decided = [...cueTones.values()].filter(Boolean).length;
@@ -1076,6 +1103,44 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     ...(opts.positionY !== undefined ? { positionY: opts.positionY } : {}),
     ...(opts.maxWordsPerCue !== undefined ? { maxWordsPerCue: opts.maxWordsPerCue } : {}),
   });
+
+  // ---- Kinetic captions: resolve ONE template/intensity for the whole
+  // ---- render. Not per-cue — reservedWidth (src/captions/svg.ts:layoutCue)
+  // ---- must reserve the same peak scale for every frame of the render, so
+  // ---- the template that drives it cannot change cue to cue without
+  // ---- reintroducing the exact layout-jitter bug reservedWidth exists to
+  // ---- prevent. `--motion none` (the default) skips all of this: `motion`
+  // ---- stays undefined and svg.ts takes the exact pre-animation path.
+  const motionIntensity = resolveIntensity({
+    level: opts.motion,
+    // An explicit --motion-intensity always wins. Otherwise, a CONCRETE
+    // --motion level (subtle/expressive) is itself an explicit choice and
+    // must beat the theme's own default — same rule this file already
+    // applies to --active-color vs theme.active.color above. The theme's
+    // default intensity is consulted only for --motion auto, where the
+    // theme genuinely IS what "auto" is supposed to mean here.
+    explicitIntensity: opts.motionIntensity ?? (opts.motion === 'auto' ? theme.motion?.intensity : undefined),
+    autoHasConfidentTone: Boolean(videoTone && videoTone.share >= theme.minConfidence),
+  });
+  const animationTemplateName = opts.motion === 'none' || motionIntensity <= 0
+    ? undefined
+    : resolveAnimationTemplateName({
+        requested: opts.animationTemplate,
+        stylePresetDefault: STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style],
+        themeToneTemplates: theme.motion?.toneTemplates,
+        tone: videoTone?.tone,
+        toneConfidence: videoTone?.share,
+        minConfidence: theme.minConfidence,
+      });
+  const motion = animationTemplateName
+    ? { template: ANIMATION_TEMPLATES[animationTemplateName]!, intensity: motionIntensity }
+    : undefined;
+  if (motion) {
+    log.info(
+      `motion: ${opts.motion} — template "${motion.template.name}" ` +
+        `(${motion.template.description}) — intensity ${motion.intensity.toFixed(2)}`,
+    );
+  }
   if (opts.font && !listFontFamilies().some((name) => name.toLocaleLowerCase() === opts.font!.toLocaleLowerCase())) {
     throw new CaptionEngineError(
       `Font family "${opts.font}" was not found.`,
@@ -1190,9 +1255,22 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       // undefined unless --prosody ran, which is what keeps the default path
       // byte-identical to the pre-prosody renderer.
       ...(toneStylesByCue ? { toneStylesByCue } : {}),
+      // undefined unless --motion is not none — same guarantee as above, this
+      // time for kinetic captions.
+      ...(motion ? { motion } : {}),
     };
-    const plans = planCaptionFrames(cues, { width, height, highlight: opts.highlight });
+    const plans = planCaptionFrames(cues, {
+      width, height, highlight: opts.highlight,
+      ...(motion ? { motion, emphasisWords } : {}),
+    });
     log.info(`${plans.length} caption frames`);
+    if (motion) {
+      log.info(
+        '  motion is on: entrance/exit/emphasis windows are sampled into extra frames, ' +
+          'so this count is higher than a static render of the same captions. If chunking ' +
+          'reports "Too many open files", lower --motion-intensity or CAPTION_ENGINE_MAX_OVERLAYS.',
+      );
+    }
 
     const frameSource = {
       count: plans.length,

@@ -1,6 +1,11 @@
 import { CaptionEngineError } from '../errors.js';
-import { listStylePresets } from '../captions/style.js';
+import { listStylePresets, MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX } from '../captions/style.js';
 import type { AspectPreset } from '../captions/style.js';
+import {
+  MOTION_LEVELS, listAnimationTemplates, assertValidMotionLevel,
+  assertValidAnimationTemplateName,
+  type MotionLevel,
+} from '../captions/animation.js';
 
 export type OutputFormat = 'mp4' | 'srt' | 'ass' | 'json' | 'all';
 
@@ -76,6 +81,16 @@ export interface CliOptions {
   /** Override config/caption-theme.json. */
   captionTheme?: string;
   /**
+   * Kinetic captions. 'none' (the default) is a hard guarantee: with it,
+   * frame planning and rendering take the exact same code path they did
+   * before this feature existed — not just a visually similar one.
+   */
+  motion: MotionLevel;
+  /** Overrides the level's own baseline strength. 0..1. */
+  motionIntensity?: number;
+  /** A name from listAnimationTemplates(), or 'auto' to resolve from tone/style. */
+  animationTemplate: string;
+  /**
    * Whether a tone styles a whole caption line or each word individually.
    * 'cue' by default: per-word tone changes roughly every 200 ms on real
    * speech, which reads as flicker rather than expression.
@@ -131,7 +146,7 @@ APPEARANCE
       --active-color <hex>  Active-word colour, e.g. #FFD400
       --active-bold         Use the real bold face for the active word
       --font <name>         Font family from assets/fonts or FONT_DIR
-      --font-size <px>      Override caption size
+      --font-size <px>      Override caption size (${MIN_FONT_SIZE_PX}-${MAX_FONT_SIZE_PX}, default: preset's own size)
       --position-y <0..1>   Vertical anchor, 0 = top, 1 = bottom (default: 0.72)
       --max-words <n>       Max words shown at once
       --crop-focus <0..1>   Horizontal focus when reframing      (default: 0.5)
@@ -159,6 +174,23 @@ APPEARANCE
                                  tone changes ~5x/second on real speech.
                             word a tone per word. More responsive, twitchier.
       --caption-theme <f>   Tone→style map. Default: config/caption-theme.json
+      --motion <level>      ${MOTION_LEVELS.join(' | ')}   (default: none)
+                            none        static rendering — IDENTICAL to no
+                                        animation at all, the safe default
+                            subtle      restrained motion, safe to leave on
+                            expressive  full template strength
+                            auto        level AND template chosen from tone/
+                                        style — needs --prosody to react to
+                                        anything; otherwise behaves like subtle
+      --motion-intensity <0..1>
+                            Overrides the level's own baseline strength
+      --animation-template <name>
+                            auto | ${listAnimationTemplates().join(' | ')}
+                            "auto" picks a restrained template from the
+                            selected --style and, with --prosody on, the
+                            detected tone. Ignored while --motion is none.
+                            Run with --diagnostics to see which template and
+                            intensity actually rendered.
       --hinglish-glossary <f>
                             Extra glossary merged over the built-in one. Maps
                             Devanagari-written English back to real spelling
@@ -279,6 +311,12 @@ EXAMPLES
   caption-engine v.mp4 --transcript-out t.json --format json
   caption-engine v.mp4 --transcript-in t.json --style neon --aspect square -o square.mp4
 
+  # Kinetic captions: a named template
+  caption-engine v.mp4 --style kinetic --motion expressive --animation-template pop -o out.mp4
+
+  # Kinetic captions that react to how the line was actually spoken
+  caption-engine v.mp4 --motion auto --prosody --animation-template auto -o out.mp4
+
 ENVIRONMENT
   ELEVENLABS_API_KEY / DEEPGRAM_API_KEY / SARVAM_API_KEY
   ANTHROPIC_API_KEY      for --clips
@@ -373,6 +411,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
     romanFallback: 'error',
     prosody: false,
     toneScope: 'cue',
+    motion: 'none',
+    animationTemplate: 'auto',
     allowStale: false,
     dryRun: false,
     verbose: false,
@@ -431,7 +471,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
       }
       case '--active-bold': o.activeBold = true; break;
       case '--font': o.font = needValue(a, next); i++; break;
-      case '--font-size': o.fontSize = num(a, next, 8, 400); i++; break;
+      case '--font-size': o.fontSize = num(a, next, MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX); i++; break;
       case '--position-y': o.positionY = num(a, next, 0, 1); i++; break;
       case '--max-words': o.maxWordsPerCue = num(a, next, 1, 20); i++; break;
       case '--crop-focus': o.cropFocusX = num(a, next, 0, 1); i++; break;
@@ -491,6 +531,17 @@ export function parseArgs(argv: string[]): ParsedCommand {
         break;
       }
       case '--caption-theme': o.captionTheme = needValue(a, next); i++; break;
+      case '--motion': {
+        const v = needValue(a, next).toLowerCase();
+        assertValidMotionLevel(v);
+        o.motion = v; i++; break;
+      }
+      case '--motion-intensity': o.motionIntensity = num(a, next, 0, 1); i++; break;
+      case '--animation-template': case '--animation-preset': {
+        const v = needValue(a, next);
+        assertValidAnimationTemplateName(v);
+        o.animationTemplate = v; i++; break;
+      }
       case '--code-switching': case '--code-switch': o.codeSwitching = true; break;
       case '--keyterms':
         o.keyterms = needValue(a, next).split(',').map((x) => x.trim()).filter(Boolean);

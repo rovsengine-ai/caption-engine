@@ -828,12 +828,19 @@ node dist/src/cli.js podcast.mp4 --clips --format json -o podcast.json
 ### Styling
 
 ```
---style      default | bold | minimal | neon | classic
+--style      default | bold | minimal | neon | classic | pop | soft | highContrast |
+             creator | karaoke | elegant | kinetic | cinematic | comic | lyric | editorial
 --aspect     portrait | landscape | square | original
 --highlight  active-word | none
---active-scale 1.08      --font-size 72      --position-y 0.72
+--active-scale 1.08      --font-size 8-400px      --position-y 0.72
 --max-words 4            --crop-focus 0.5
 ```
+
+Run `caption-engine --help` for the authoritative, always-current list — the five original
+presets (`default`/`bold`/`minimal`/`neon`/`classic`) keep their exact original look;
+everything after them is additional. Each preset also has a restrained default kinetic
+animation template (see "Kinetic captions" below), used only when `--motion` is not `none`
+and `--animation-template auto` is in effect.
 
 ### Fonts
 
@@ -963,6 +970,119 @@ which mean nothing across different recordings.
 Resolution order is `base style → tone → active-word state`. The active state wins: tone
 describes how a word was spoken and is fixed for the cue, while the highlight changes
 frame to frame, so the transient signal must stay visible.
+
+### Kinetic captions (`--motion`)
+
+Word/cue-level motion — entrances, exits, active-word behavior, and emphasis — sampled
+into extra PNG overlay frames through the same SVG→PNG→FFmpeg pipeline everything else
+uses. **Off by default.** `--motion none` (the default) takes the exact code path this
+renderer used before this feature existed — not a visually similar one, the same one —
+so nothing about existing renders changes unless you opt in.
+
+```bash
+node dist/src/cli.js in.mp4 --style kinetic --motion expressive --animation-template pop
+node dist/src/cli.js in.mp4 --motion auto --prosody --animation-template auto
+node dist/src/cli.js in.mp4 --motion subtle --animation-template cinematic-fade
+```
+
+```
+--motion <level>              none | subtle | expressive | auto     (default: none)
+--motion-intensity <0..1>     Overrides the level's own baseline strength
+--animation-template <name>   auto | pop | bounce | smooth-rise | typewriter |
+                               karaoke-sweep | punch | beat-sync | float | slide |
+                               glitch | neon-pulse | comic-hit | cinematic-fade |
+                               lyric-flow | minimal-reveal | dynamic-word-focus
+```
+
+**Levels.** `none` is static. `subtle` and `expressive` apply the chosen template at a
+restrained or full baseline strength respectively. `auto` chooses BOTH the level's
+strength and (when `--animation-template` is also `auto`, the default) the template
+itself from the selected `--style` and, with `--prosody` on, the video's overall detected
+delivery — without `--prosody`, `auto` behaves like a quiet `subtle`.
+
+**Precedence**, matching how `--active-color` already beats `theme.active.color`
+elsewhere in this file: an explicit `--motion-intensity` always wins; otherwise a
+concrete `--motion` level (`subtle`/`expressive`) is itself an explicit choice and beats
+`config/caption-theme.json`'s `motion.intensity`; the theme default is consulted only
+under `--motion auto`.
+
+**One template for the whole render, not per cue.** `reservedWidth` — the mechanism that
+stops the active word from shoving the line sideways (see "Active-word highlighting"
+above) — must reserve the same peak scale for every frame of the render. A template that
+changed cue to cue would reintroduce exactly that bug. `--animation-template auto` still
+reacts to delivery: it picks one restrained template for the whole video from the overall
+dominant tone, and layers per-word *emphasis* (see below) on top of it, rather than
+swapping templates mid-video.
+
+**Emphasis** reuses the SAME tone classification and confidence gate that already drives
+tone-based colour/scale (`config/caption-theme.json`'s `minConfidence`) — a word only gets
+a template's emphasis treatment (a harder punch, a card backplate, a glow, or — only here,
+never as a default — a brief shake) when it was independently classified `excited` or
+`emphatic` at high confidence. Shake is gated stricter than everything else on purpose:
+it is the one effect that reads as broken rendering if it fires on an ordinary word.
+
+**The template library** — every template defines a cue entrance, a word entrance, a
+continuous "active" behavior for the rest of the word's time on screen, an emphasis
+override, an exit, and (for some) a decoration:
+
+| Template | Behavior | Try it |
+|---|---|---|
+| `pop` | Quick scale-up with a slight overshoot, then settle. The default kinetic feel. | `--animation-template pop` |
+| `bounce` | Elastic settle on entrance — springy, playful. | `--animation-template bounce` |
+| `smooth-rise` | Restrained upward drift and fade. The safe default direction. | `--animation-template smooth-rise` |
+| `typewriter` | Each word is revealed by a growing clip, as if typed in. | `--animation-template typewriter` |
+| `karaoke-sweep` | The active colour sweeps left-to-right across each word as it is spoken. | `--animation-template karaoke-sweep` |
+| `punch` | A fast, hard scale hit with no overshoot — blunt, for strong statements. | `--animation-template punch` |
+| `beat-sync` | Tight, quick pops timed hard to each word — for fast speech. | `--animation-template beat-sync` |
+| `float` | A gentle, continuous vertical drift while a word is held. | `--animation-template float` |
+| `slide` | Each word slides in from the side and settles. | `--animation-template slide` |
+| `glitch` | A brief, deterministic jitter on arrival — energetic, digital-feeling. | `--animation-template glitch` |
+| `neon-pulse` | A soft glow behind each word, pulsing gently while active. | `--animation-template neon-pulse` |
+| `comic-hit` | A rounded emphasis card pops in behind the word on a hard hit. | `--animation-template comic-hit` |
+| `cinematic-fade` | Elegant, unhurried fades, almost no scale change. | `--animation-template cinematic-fade` |
+| `lyric-flow` | A gentle rise and colour sweep, paced like a music-video lyric line. | `--animation-template lyric-flow` |
+| `minimal-reveal` | Almost nothing — a very quick, quiet fade. For editorial captions. | `--animation-template minimal-reveal` |
+| `dynamic-word-focus` | The active word grows and holds a backplate while it speaks. | `--animation-template dynamic-word-focus` |
+
+Run `caption-engine --help` for the same list with `auto` included, or `--diagnostics` on a
+`--motion`-enabled render to see which template and intensity actually resolved.
+
+**Configuring `config/caption-theme.json`'s `motion` section** (all fields optional):
+
+```json
+"motion": {
+  "template": "smooth-rise",
+  "intensity": 0.45,
+  "toneTemplates": { "excited": "punch", "soft": "cinematic-fade" }
+}
+```
+
+`template`/`intensity` are the project's own defaults when the matching CLI flag is not
+given. `toneTemplates` is only consulted by `--animation-template auto`.
+
+**Determinism.** Every offset is a pure function of the word's own `start`/`end`, its
+template, and (for effects like `glitch`'s jitter) a hash of its own text — never
+`Math.random()`, never wall-clock time. The same transcript and flags always produce the
+same frames.
+
+**Reused, not replaced.** Motion is a transform/opacity/clip layer applied AROUND
+already-shaped glyph outlines — it never re-shapes text, so HarfBuzz shaping, vendored
+fonts, and glyph-fallback behavior are exactly as described above, for every script this
+project supports, with or without `--motion`.
+
+**Frame count.** Motion samples entrance/exit/emphasis windows into extra overlay frames —
+a render with `--motion expressive` produces meaningfully more frames than a static one of
+the same captions (bounded per word, not unlimited: see `src/captions/animation.ts` for
+the exact caps). If chunking reports "Too many open files", lower `--motion-intensity` or
+`CAPTION_ENGINE_MAX_OVERLAYS` (see "How long videos are rendered" above).
+
+**Honest limits.** Glow is approximated with wider, low-opacity duplicate strokes rather
+than an SVG blur filter — resvg's filter support was not verified for this project, and
+the stroke approach needs no capability check to work everywhere resvg does. There is no
+true character-by-character typewriter re-shape; `typewriter`/`karaoke-sweep` reveal
+already-shaped glyphs through a growing clip, which is why they stay script-safe without
+extra work. Auto template selection reacts to the video's OVERALL delivery, not a
+moment-to-moment mood swing — see "one template for the whole render" above for why.
 
 ### Diagnostics
 
