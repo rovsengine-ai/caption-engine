@@ -189,6 +189,25 @@ describe('clip finder', () => {
     assert.equal(parseClipResponse(raw, long, DEFAULT_CLIP_OPTIONS)[0]!.score, 100);
   });
 
+  test('a negative startIndex from the model does not corrupt the excerpt', () => {
+    // Array.slice treats a negative start as "from the end", so an unclamped
+    // out-of-range index would silently pull words from the wrong part of the
+    // transcript instead of clamping to the first word like the timing does.
+    const long = {
+      ...hinglishTranscript,
+      words: Array.from({ length: 200 }, (_, i) => ({
+        text: `w${i}`, start: i * 0.5, end: i * 0.5 + 0.4,
+        confidence: 1, type: 'word' as const, keep: true,
+      })),
+      duration: 100,
+    };
+    const raw = '{"clips":[{"startIndex":-5,"endIndex":60,"score":85,"title":"T","reason":"R"}]}';
+    const out = parseClipResponse(raw, long, DEFAULT_CLIP_OPTIONS);
+    assert.equal(out.length, 1);
+    assert.equal(out[0]!.start, long.words[0]!.start, 'clamps to the first word, like the timing does');
+    assert.ok(out[0]!.transcriptExcerpt.startsWith('w0 '), 'excerpt must start at the clamped word, not the transcript tail');
+  });
+
   test('dedupes overlapping candidates, keeping the best', () => {
     const out = dedupeCandidates([
       { start: 0, end: 30, score: 70, title: 'a', reason: '', transcriptExcerpt: '' },

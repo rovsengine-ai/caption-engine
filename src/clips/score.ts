@@ -126,8 +126,14 @@ export function parseClipResponse(
     const ei = Number(c.endIndex);
     if (!Number.isFinite(si) || !Number.isFinite(ei)) continue;
 
-    const a = words[Math.max(0, Math.min(si, words.length - 1))];
-    const b = words[Math.max(0, Math.min(ei, words.length - 1))];
+    // Clamp indices before using them anywhere — Array.slice treats a negative
+    // start as "from the end", so an out-of-range LLM index must never reach
+    // .slice() unclamped, or the excerpt silently pulls text from the wrong
+    // part of the transcript.
+    const ai = Math.max(0, Math.min(si, words.length - 1));
+    const bi = Math.max(0, Math.min(ei, words.length - 1));
+    const a = words[ai];
+    const b = words[bi];
     if (!a || !b || b.end <= a.start) continue;
 
     const dur = b.end - a.start;
@@ -142,7 +148,7 @@ export function parseClipResponse(
       title: String(c.title ?? '').slice(0, 120) || 'Untitled clip',
       reason: String(c.reason ?? '').slice(0, 400),
       transcriptExcerpt: words
-        .slice(Math.min(si, ei), Math.max(si, ei) + 1)
+        .slice(Math.min(ai, bi), Math.max(ai, bi) + 1)
         .map((w) => w.text)
         .join(' ')
         .slice(0, 600),
