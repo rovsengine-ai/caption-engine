@@ -22,6 +22,13 @@ export type VisionComplete = (
 export interface VisionBatchOptions {
   /** Frames sent per Vision AI call. */
   batchSize?: number;
+  /**
+   * Called once per batch that fails (request error or unparseable response).
+   * Without this, a bad API key, wrong model name, or malformed response is
+   * indistinguishable from "every frame looked fine" — the caller just sees
+   * zero flagged frames either way.
+   */
+  onBatchError?: (error: unknown, batch: ExtractedFrame[]) => void;
 }
 
 export const DEFAULT_VISION_BATCH_SIZE = 10;
@@ -100,10 +107,20 @@ export async function analyzeFrames(
         mediaType: mediaTypeFor(f.path),
       }));
       const raw = await complete(images, buildVisualAnalysisPrompt(batch));
-      out.push(...parseVisualAnalysisResponse(raw, batch));
-    } catch {
+      const parsed = parseVisualAnalysisResponse(raw, batch);
+      if (parsed.length === 0) {
+        opts.onBatchError?.(
+          new Error(`Vision AI response for this batch had no parseable frame verdicts: ${raw.slice(0, 200)}`),
+          batch,
+        );
+      }
+      out.push(...parsed);
+    } catch (error) {
       // One bad batch shouldn't sink the whole job — a partial result set is
       // still useful, same tolerance findClips() applies to a bad LLM chunk.
+      // But it must be surfaced, or a systemic failure (bad key, wrong model,
+      // rate limit) silently looks identical to "no unusable frames found".
+      opts.onBatchError?.(error, batch);
       continue;
     }
   }
@@ -119,7 +136,7 @@ export async function analyzeFrames(
  */
 export function makeAnthropicVisionCompletion(
   apiKey: string,
-  model = 'claude-sonnet-4-5',
+  model = 'claude-sonnet-5',
 ): VisionComplete {
   return async (images, prompt): Promise<string> => {
     const content: Array<Record<string, unknown>> = images.map((img) => ({

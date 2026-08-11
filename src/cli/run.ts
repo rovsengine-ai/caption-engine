@@ -696,7 +696,19 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           const { analyzeFrames, makeAnthropicVisionCompletion } = await import('../clips/vision.js');
           const frames = await extractFrames(inputPath, workDir);
           log.info(`${frames.length} frame(s) extracted (1 fps)`);
-          visualAnalysis = await analyzeFrames(frames, makeAnthropicVisionCompletion(key));
+          if (frames.length === 0) {
+            log.warn('no frames were extracted — check that the input actually has a readable video stream.');
+          }
+          let batchErrors = 0;
+          visualAnalysis = await analyzeFrames(frames, makeAnthropicVisionCompletion(key), {
+            onBatchError: (error) => {
+              batchErrors++;
+              log.warn(`video analysis batch failed: ${error instanceof Error ? error.message : String(error)}`);
+            },
+          });
+          if (batchErrors > 0) {
+            log.warn(`${batchErrors} batch(es) failed during video analysis — results are partial.`);
+          }
           const rejected = visualAnalysis.filter((r) => !r.usable).length;
           log.info(`${rejected} of ${visualAnalysis.length} frame(s) flagged as unusable footage`);
         }

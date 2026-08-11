@@ -1,0 +1,1058 @@
+{
+  "asrTranscript": {
+    "words": [
+      {
+        "text": "Sir,",
+        "start": 0.159,
+        "end": 0.379,
+        "confidence": 0.7057391172760261,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.539,
+        "end": 2.279,
+        "confidence": 0.7019237680827457,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "कमलेश",
+        "start": 0.679,
+        "end": 0.979,
+        "confidence": 0.7019237680827457,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.979,
+        "end": 1.019,
+        "confidence": 0.9999665033109116,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "ने",
+        "start": 1.019,
+        "end": 1.1,
+        "confidence": 0.9999665033109116,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.1,
+        "end": 1.14,
+        "confidence": 0.9991069669848369,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "काम",
+        "start": 1.14,
+        "end": 1.299,
+        "confidence": 0.9991069669848369,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.299,
+        "end": 1.399,
+        "confidence": 0.9999929667012066,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "कर",
+        "start": 1.4,
+        "end": 1.479,
+        "confidence": 0.9999929667012066,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.479,
+        "end": 1.579,
+        "confidence": 0.9999794964234012,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "दिया",
+        "start": 1.579,
+        "end": 1.759,
+        "confidence": 0.9999794964234012,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.759,
+        "end": 1.799,
+        "confidence": 0.9999924898711537,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "है।",
+        "start": 1.799,
+        "end": 2.039,
+        "confidence": 0.9998973009406273,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.639,
+        "end": 3.639,
+        "confidence": 0.9966164069484094,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "शाबाश",
+        "start": 2.299,
+        "end": 2.799,
+        "confidence": 0.9907305689315109,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 2.799,
+        "end": 2.859,
+        "confidence": 0.9999623312833917,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "मेरे",
+        "start": 2.859,
+        "end": 3.119,
+        "confidence": 0.9999623312833917,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.119,
+        "end": 3.199,
+        "confidence": 0.9996780002157216,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "शेर।",
+        "start": 3.199,
+        "end": 3.659,
+        "confidence": 0.9293888636962796,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.619,
+        "end": 6.619,
+        "confidence": 0.8445694104120103,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "बंदूकें,",
+        "start": 3.939,
+        "end": 4.639,
+        "confidence": 0.876686664572645,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.519,
+        "end": 8.519,
+        "confidence": 0.9446929587614001,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "बम,",
+        "start": 4.899,
+        "end": 5.299,
+        "confidence": 0.9464786323357615,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 10.059,
+        "end": 11.059,
+        "confidence": 0.9987957691129159,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "हथियार",
+        "start": 5.579,
+        "end": 6.559,
+        "confidence": 0.9987957691129159,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 12.039,
+        "end": 12.039,
+        "confidence": 0.9405089355619165,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "लूट",
+        "start": 6.82,
+        "end": 7.039,
+        "confidence": 0.9405089355619165,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.039,
+        "end": 7.099,
+        "confidence": 0.7075775066897609,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "लाए",
+        "start": 7.099,
+        "end": 7.32,
+        "confidence": 0.7075775066897609,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.32,
+        "end": 7.379,
+        "confidence": 0.9931291052524759,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "रे",
+        "start": 7.379,
+        "end": 7.499,
+        "confidence": 0.9931291052524759,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.499,
+        "end": 7.579,
+        "confidence": 0.9686060682229316,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "तू",
+        "start": 7.579,
+        "end": 7.659,
+        "confidence": 0.9686060682229316,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.659,
+        "end": 7.699,
+        "confidence": 0.9968899951564905,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "तो",
+        "start": 7.699,
+        "end": 7.82,
+        "confidence": 0.9968899951564905,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.82,
+        "end": 7.86,
+        "confidence": 0.5260194586750802,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "police",
+        "start": 7.86,
+        "end": 8.119,
+        "confidence": 0.5260194586750802,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.119,
+        "end": 8.159,
+        "confidence": 0.9998169280547704,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "को",
+        "start": 8.159,
+        "end": 8.379,
+        "confidence": 0.9998169280547704,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.379,
+        "end": 8.479,
+        "confidence": 0.9978691540966436,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "लूट",
+        "start": 8.479,
+        "end": 8.739,
+        "confidence": 0.9978691540966436,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.739,
+        "end": 8.799,
+        "confidence": 0.9989518196209974,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "लाया।",
+        "start": 8.799,
+        "end": 9.379,
+        "confidence": 0.9980880632417903,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      }
+    ],
+    "language": "hi",
+    "detectedLanguageRaw": "hin",
+    "duration": 9.379,
+    "provider": "elevenlabs",
+    "model": "scribe_v2",
+    "hasWordTimings": true
+  },
+  "transcript": {
+    "words": [
+      {
+        "text": "Sir,",
+        "start": 0.159,
+        "end": 0.379,
+        "confidence": 0.7057391172760261,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.539,
+        "end": 2.279,
+        "confidence": 0.7019237680827457,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "कमलेश",
+        "start": 0.679,
+        "end": 0.979,
+        "confidence": 0.7019237680827457,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.979,
+        "end": 1.019,
+        "confidence": 0.9999665033109116,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "ने",
+        "start": 1.019,
+        "end": 1.1,
+        "confidence": 0.9999665033109116,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.1,
+        "end": 1.14,
+        "confidence": 0.9991069669848369,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "काम",
+        "start": 1.14,
+        "end": 1.299,
+        "confidence": 0.9991069669848369,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.299,
+        "end": 1.399,
+        "confidence": 0.9999929667012066,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "कर",
+        "start": 1.4,
+        "end": 1.479,
+        "confidence": 0.9999929667012066,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.479,
+        "end": 1.579,
+        "confidence": 0.9999794964234012,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "दिया",
+        "start": 1.579,
+        "end": 1.759,
+        "confidence": 0.9999794964234012,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.759,
+        "end": 1.799,
+        "confidence": 0.9999924898711537,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "है।",
+        "start": 1.799,
+        "end": 2.039,
+        "confidence": 0.9998973009406273,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.639,
+        "end": 3.639,
+        "confidence": 0.9966164069484094,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "शाबाश",
+        "start": 2.299,
+        "end": 2.799,
+        "confidence": 0.9907305689315109,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 2.799,
+        "end": 2.859,
+        "confidence": 0.9999623312833917,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "मेरे",
+        "start": 2.859,
+        "end": 3.119,
+        "confidence": 0.9999623312833917,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.119,
+        "end": 3.199,
+        "confidence": 0.9996780002157216,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "शेर।",
+        "start": 3.199,
+        "end": 3.659,
+        "confidence": 0.9293888636962796,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.619,
+        "end": 6.619,
+        "confidence": 0.8445694104120103,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "बंदूकें,",
+        "start": 3.939,
+        "end": 4.639,
+        "confidence": 0.876686664572645,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.519,
+        "end": 8.519,
+        "confidence": 0.9446929587614001,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "बम,",
+        "start": 4.899,
+        "end": 5.299,
+        "confidence": 0.9464786323357615,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 10.059,
+        "end": 11.059,
+        "confidence": 0.9987957691129159,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "हथियार",
+        "start": 5.579,
+        "end": 6.559,
+        "confidence": 0.9987957691129159,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 12.039,
+        "end": 12.039,
+        "confidence": 0.9405089355619165,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "लूट",
+        "start": 6.82,
+        "end": 7.039,
+        "confidence": 0.9405089355619165,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.039,
+        "end": 7.099,
+        "confidence": 0.7075775066897609,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "लाए",
+        "start": 7.099,
+        "end": 7.32,
+        "confidence": 0.7075775066897609,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.32,
+        "end": 7.379,
+        "confidence": 0.9931291052524759,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "रे",
+        "start": 7.379,
+        "end": 7.499,
+        "confidence": 0.9931291052524759,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.499,
+        "end": 7.579,
+        "confidence": 0.9686060682229316,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "तू",
+        "start": 7.579,
+        "end": 7.659,
+        "confidence": 0.9686060682229316,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.659,
+        "end": 7.699,
+        "confidence": 0.9968899951564905,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "तो",
+        "start": 7.699,
+        "end": 7.82,
+        "confidence": 0.9968899951564905,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.82,
+        "end": 7.86,
+        "confidence": 0.5260194586750802,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "police",
+        "start": 7.86,
+        "end": 8.119,
+        "confidence": 0.5260194586750802,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.119,
+        "end": 8.159,
+        "confidence": 0.9998169280547704,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "को",
+        "start": 8.159,
+        "end": 8.379,
+        "confidence": 0.9998169280547704,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.379,
+        "end": 8.479,
+        "confidence": 0.9978691540966436,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "लूट",
+        "start": 8.479,
+        "end": 8.739,
+        "confidence": 0.9978691540966436,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 8.739,
+        "end": 8.799,
+        "confidence": 0.9989518196209974,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "लाया।",
+        "start": 8.799,
+        "end": 9.379,
+        "confidence": 0.9980880632417903,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      }
+    ],
+    "language": "hi",
+    "detectedLanguageRaw": "hin",
+    "duration": 9.379,
+    "provider": "elevenlabs",
+    "model": "scribe_v2",
+    "hasWordTimings": true
+  },
+  "cues": [
+    {
+      "index": 0,
+      "start": 0.159,
+      "end": 1.299,
+      "words": [
+        {
+          "text": "Sir,",
+          "start": 0.159,
+          "end": 0.379,
+          "confidence": 0.7057391172760261,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "कमलेश",
+          "start": 0.679,
+          "end": 0.979,
+          "confidence": 0.7019237680827457,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "ने",
+          "start": 1.019,
+          "end": 1.1,
+          "confidence": 0.9999665033109116,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "काम",
+          "start": 1.14,
+          "end": 1.299,
+          "confidence": 0.9991069669848369,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "Sir, कमलेश ने काम"
+    },
+    {
+      "index": 1,
+      "start": 1.4,
+      "end": 2.039,
+      "words": [
+        {
+          "text": "कर",
+          "start": 1.4,
+          "end": 1.479,
+          "confidence": 0.9999929667012066,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "दिया",
+          "start": 1.579,
+          "end": 1.759,
+          "confidence": 0.9999794964234012,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "है।",
+          "start": 1.799,
+          "end": 2.039,
+          "confidence": 0.9998973009406273,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "कर दिया है।"
+    },
+    {
+      "index": 2,
+      "start": 2.299,
+      "end": 3.659,
+      "words": [
+        {
+          "text": "शाबाश",
+          "start": 2.299,
+          "end": 2.799,
+          "confidence": 0.9907305689315109,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "मेरे",
+          "start": 2.859,
+          "end": 3.119,
+          "confidence": 0.9999623312833917,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "शेर।",
+          "start": 3.199,
+          "end": 3.659,
+          "confidence": 0.9293888636962796,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "शाबाश मेरे शेर।"
+    },
+    {
+      "index": 3,
+      "start": 3.939,
+      "end": 6.559,
+      "words": [
+        {
+          "text": "बंदूकें,",
+          "start": 3.939,
+          "end": 4.639,
+          "confidence": 0.876686664572645,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "बम,",
+          "start": 4.899,
+          "end": 5.299,
+          "confidence": 0.9464786323357615,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "हथियार",
+          "start": 5.579,
+          "end": 6.559,
+          "confidence": 0.9987957691129159,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "बंदूकें, बम, हथियार"
+    },
+    {
+      "index": 4,
+      "start": 6.82,
+      "end": 7.659,
+      "words": [
+        {
+          "text": "लूट",
+          "start": 6.82,
+          "end": 7.039,
+          "confidence": 0.9405089355619165,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "लाए",
+          "start": 7.099,
+          "end": 7.32,
+          "confidence": 0.7075775066897609,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "रे",
+          "start": 7.379,
+          "end": 7.499,
+          "confidence": 0.9931291052524759,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "तू",
+          "start": 7.579,
+          "end": 7.659,
+          "confidence": 0.9686060682229316,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "लूट लाए रे तू"
+    },
+    {
+      "index": 5,
+      "start": 7.699,
+      "end": 8.739,
+      "words": [
+        {
+          "text": "तो",
+          "start": 7.699,
+          "end": 7.82,
+          "confidence": 0.9968899951564905,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "police",
+          "start": 7.86,
+          "end": 8.119,
+          "confidence": 0.5260194586750802,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "को",
+          "start": 8.159,
+          "end": 8.379,
+          "confidence": 0.9998169280547704,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "लूट",
+          "start": 8.479,
+          "end": 8.739,
+          "confidence": 0.9978691540966436,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "तो police को लूट"
+    },
+    {
+      "index": 6,
+      "start": 8.799,
+      "end": 9.379,
+      "words": [
+        {
+          "text": "लाया।",
+          "start": 8.799,
+          "end": 9.379,
+          "confidence": 0.9980880632417903,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "लाया।"
+    }
+  ],
+  "trim": {
+    "cuts": 7,
+    "restored": 0,
+    "secondsRemoved": 6.56,
+    "trimmedDuration": 9.379
+  }
+}

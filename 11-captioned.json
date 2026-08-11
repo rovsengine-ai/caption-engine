@@ -1,0 +1,1021 @@
+{
+  "asrTranscript": {
+    "words": [
+      {
+        "text": "श्रा,",
+        "start": 0.139,
+        "end": 0.219,
+        "confidence": 0.18993784986642226,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.219,
+        "end": 0.219,
+        "confidence": 0.9996582246165773,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "शादी",
+        "start": 0.219,
+        "end": 0.58,
+        "confidence": 0.9996582246165773,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.58,
+        "end": 0.659,
+        "confidence": 0.999940756491565,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "का",
+        "start": 0.659,
+        "end": 0.779,
+        "confidence": 0.999940756491565,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.779,
+        "end": 0.839,
+        "confidence": 0.981483160635629,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "घर",
+        "start": 0.839,
+        "end": 1.039,
+        "confidence": 0.981483160635629,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.039,
+        "end": 1.079,
+        "confidence": 0.9848110829284514,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "में",
+        "start": 1.08,
+        "end": 1.239,
+        "confidence": 0.9848110829284514,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.239,
+        "end": 1.28,
+        "confidence": 0.983374924265771,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "नहीं",
+        "start": 1.28,
+        "end": 1.399,
+        "confidence": 0.983374924265771,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.399,
+        "end": 1.439,
+        "confidence": 0.9991744425294605,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "होता।",
+        "start": 1.439,
+        "end": 2.019,
+        "confidence": 0.9990696254672183,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 2.019,
+        "end": 2.059,
+        "confidence": 0.8936725996110535,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "हां।",
+        "start": 2.06,
+        "end": 3.099,
+        "confidence": 0.5289947067313697,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.099,
+        "end": 3.199,
+        "confidence": 0.8330286051712525,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "ऐसी",
+        "start": 3.199,
+        "end": 3.48,
+        "confidence": 0.8651448491448592,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.48,
+        "end": 3.639,
+        "confidence": 0.9619918073249447,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "अभी",
+        "start": 3.639,
+        "end": 4.04,
+        "confidence": 0.9619918073249447,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 4.04,
+        "end": 4.48,
+        "confidence": 0.9399162735809056,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "हमारे",
+        "start": 4.48,
+        "end": 5.119,
+        "confidence": 0.9399162735809056,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 5.119,
+        "end": 5.259,
+        "confidence": 0.9987675853490352,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "videos",
+        "start": 5.259,
+        "end": 5.659,
+        "confidence": 0.9987675853490352,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 5.659,
+        "end": 5.679,
+        "confidence": 0.9790937540745145,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "and",
+        "start": 5.679,
+        "end": 5.879,
+        "confidence": 0.9790937540745145,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 5.879,
+        "end": 5.919,
+        "confidence": 0.9997276809372253,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "photos",
+        "start": 5.919,
+        "end": 6.279,
+        "confidence": 0.9997276809372253,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.279,
+        "end": 6.359,
+        "confidence": 0.999717315487543,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "आए",
+        "start": 6.359,
+        "end": 6.54,
+        "confidence": 0.999717315487543,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.54,
+        "end": 6.619,
+        "confidence": 0.9999570864969811,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "थे",
+        "start": 6.619,
+        "end": 6.919,
+        "confidence": 0.9999570864969811,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.919,
+        "end": 7.259,
+        "confidence": 0.8353889161039629,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "भैया",
+        "start": 7.259,
+        "end": 7.58,
+        "confidence": 0.8353889161039629,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.58,
+        "end": 7.659,
+        "confidence": 0.8494219150338165,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "के",
+        "start": 7.659,
+        "end": 7.759,
+        "confidence": 0.8494219150338165,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.759,
+        "end": 7.839,
+        "confidence": 0.7833404491107384,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "साथ।",
+        "start": 7.84,
+        "end": 9.42,
+        "confidence": 0.8326285384624608,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 10.34,
+        "end": 10.34,
+        "confidence": 0.7702397546265407,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "Photos।",
+        "start": 9.679,
+        "end": 10.36,
+        "confidence": 0.6792142436902533,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 12.96,
+        "end": 12.96,
+        "confidence": 0.7561836042122551,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "शायद।",
+        "start": 10.619,
+        "end": 11.719,
+        "confidence": 0.9613403010249182,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      }
+    ],
+    "language": "hi",
+    "detectedLanguageRaw": "hin",
+    "duration": 11.719,
+    "provider": "elevenlabs",
+    "model": "scribe_v2",
+    "hasWordTimings": true
+  },
+  "transcript": {
+    "words": [
+      {
+        "text": "श्रा,",
+        "start": 0.139,
+        "end": 0.219,
+        "confidence": 0.18993784986642226,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.219,
+        "end": 0.219,
+        "confidence": 0.9996582246165773,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "शादी",
+        "start": 0.219,
+        "end": 0.58,
+        "confidence": 0.9996582246165773,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.58,
+        "end": 0.659,
+        "confidence": 0.999940756491565,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "का",
+        "start": 0.659,
+        "end": 0.779,
+        "confidence": 0.999940756491565,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 0.779,
+        "end": 0.839,
+        "confidence": 0.981483160635629,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "घर",
+        "start": 0.839,
+        "end": 1.039,
+        "confidence": 0.981483160635629,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.039,
+        "end": 1.079,
+        "confidence": 0.9848110829284514,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "में",
+        "start": 1.08,
+        "end": 1.239,
+        "confidence": 0.9848110829284514,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.239,
+        "end": 1.28,
+        "confidence": 0.983374924265771,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "नहीं",
+        "start": 1.28,
+        "end": 1.399,
+        "confidence": 0.983374924265771,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 1.399,
+        "end": 1.439,
+        "confidence": 0.9991744425294605,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "होता।",
+        "start": 1.439,
+        "end": 2.019,
+        "confidence": 0.9990696254672183,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 2.019,
+        "end": 2.059,
+        "confidence": 0.8936725996110535,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "हां।",
+        "start": 2.06,
+        "end": 3.099,
+        "confidence": 0.5289947067313697,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.099,
+        "end": 3.199,
+        "confidence": 0.8330286051712525,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "ऐसी",
+        "start": 3.199,
+        "end": 3.48,
+        "confidence": 0.8651448491448592,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 3.48,
+        "end": 3.639,
+        "confidence": 0.9619918073249447,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "अभी",
+        "start": 3.639,
+        "end": 4.04,
+        "confidence": 0.9619918073249447,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 4.04,
+        "end": 4.48,
+        "confidence": 0.9399162735809056,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "हमारे",
+        "start": 4.48,
+        "end": 5.119,
+        "confidence": 0.9399162735809056,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 5.119,
+        "end": 5.259,
+        "confidence": 0.9987675853490352,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "videos",
+        "start": 5.259,
+        "end": 5.659,
+        "confidence": 0.9987675853490352,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 5.659,
+        "end": 5.679,
+        "confidence": 0.9790937540745145,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "and",
+        "start": 5.679,
+        "end": 5.879,
+        "confidence": 0.9790937540745145,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 5.879,
+        "end": 5.919,
+        "confidence": 0.9997276809372253,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "photos",
+        "start": 5.919,
+        "end": 6.279,
+        "confidence": 0.9997276809372253,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.279,
+        "end": 6.359,
+        "confidence": 0.999717315487543,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "आए",
+        "start": 6.359,
+        "end": 6.54,
+        "confidence": 0.999717315487543,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.54,
+        "end": 6.619,
+        "confidence": 0.9999570864969811,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "थे",
+        "start": 6.619,
+        "end": 6.919,
+        "confidence": 0.9999570864969811,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 6.919,
+        "end": 7.259,
+        "confidence": 0.8353889161039629,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "भैया",
+        "start": 7.259,
+        "end": 7.58,
+        "confidence": 0.8353889161039629,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.58,
+        "end": 7.659,
+        "confidence": 0.8494219150338165,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "के",
+        "start": 7.659,
+        "end": 7.759,
+        "confidence": 0.8494219150338165,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 7.759,
+        "end": 7.839,
+        "confidence": 0.7833404491107384,
+        "type": "spacing",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": "साथ।",
+        "start": 7.84,
+        "end": 9.42,
+        "confidence": 0.8326285384624608,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 10.34,
+        "end": 10.34,
+        "confidence": 0.7702397546265407,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "Photos।",
+        "start": 9.679,
+        "end": 10.36,
+        "confidence": 0.6792142436902533,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      },
+      {
+        "text": " ",
+        "start": 12.96,
+        "end": 12.96,
+        "confidence": 0.7561836042122551,
+        "type": "spacing",
+        "language": "hi",
+        "keep": false
+      },
+      {
+        "text": "शायद।",
+        "start": 10.619,
+        "end": 11.719,
+        "confidence": 0.9613403010249182,
+        "type": "word",
+        "language": "hi",
+        "keep": true
+      }
+    ],
+    "language": "hi",
+    "detectedLanguageRaw": "hin",
+    "duration": 11.719,
+    "provider": "elevenlabs",
+    "model": "scribe_v2",
+    "hasWordTimings": true
+  },
+  "cues": [
+    {
+      "index": 0,
+      "start": 0.139,
+      "end": 1.039,
+      "words": [
+        {
+          "text": "श्रा,",
+          "start": 0.139,
+          "end": 0.219,
+          "confidence": 0.18993784986642226,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "शादी",
+          "start": 0.219,
+          "end": 0.58,
+          "confidence": 0.9996582246165773,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "का",
+          "start": 0.659,
+          "end": 0.779,
+          "confidence": 0.999940756491565,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "घर",
+          "start": 0.839,
+          "end": 1.039,
+          "confidence": 0.981483160635629,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "श्रा, शादी का घर"
+    },
+    {
+      "index": 1,
+      "start": 1.08,
+      "end": 2.019,
+      "words": [
+        {
+          "text": "में",
+          "start": 1.08,
+          "end": 1.239,
+          "confidence": 0.9848110829284514,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "नहीं",
+          "start": 1.28,
+          "end": 1.399,
+          "confidence": 0.983374924265771,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "होता।",
+          "start": 1.439,
+          "end": 2.019,
+          "confidence": 0.9990696254672183,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "में नहीं होता।"
+    },
+    {
+      "index": 2,
+      "start": 2.06,
+      "end": 3.099,
+      "words": [
+        {
+          "text": "हां।",
+          "start": 2.06,
+          "end": 3.099,
+          "confidence": 0.5289947067313697,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "हां।"
+    },
+    {
+      "index": 3,
+      "start": 3.199,
+      "end": 5.659,
+      "words": [
+        {
+          "text": "ऐसी",
+          "start": 3.199,
+          "end": 3.48,
+          "confidence": 0.8651448491448592,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "अभी",
+          "start": 3.639,
+          "end": 4.04,
+          "confidence": 0.9619918073249447,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "हमारे",
+          "start": 4.48,
+          "end": 5.119,
+          "confidence": 0.9399162735809056,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "videos",
+          "start": 5.259,
+          "end": 5.659,
+          "confidence": 0.9987675853490352,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "ऐसी अभी हमारे videos"
+    },
+    {
+      "index": 4,
+      "start": 5.679,
+      "end": 6.919,
+      "words": [
+        {
+          "text": "and",
+          "start": 5.679,
+          "end": 5.879,
+          "confidence": 0.9790937540745145,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "photos",
+          "start": 5.919,
+          "end": 6.279,
+          "confidence": 0.9997276809372253,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "आए",
+          "start": 6.359,
+          "end": 6.54,
+          "confidence": 0.999717315487543,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "थे",
+          "start": 6.619,
+          "end": 6.919,
+          "confidence": 0.9999570864969811,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "and photos आए थे"
+    },
+    {
+      "index": 5,
+      "start": 7.259,
+      "end": 9.42,
+      "words": [
+        {
+          "text": "भैया",
+          "start": 7.259,
+          "end": 7.58,
+          "confidence": 0.8353889161039629,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "के",
+          "start": 7.659,
+          "end": 7.759,
+          "confidence": 0.8494219150338165,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        },
+        {
+          "text": "साथ।",
+          "start": 7.84,
+          "end": 9.42,
+          "confidence": 0.8326285384624608,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "भैया के साथ।"
+    },
+    {
+      "index": 6,
+      "start": 9.679,
+      "end": 10.36,
+      "words": [
+        {
+          "text": "Photos।",
+          "start": 9.679,
+          "end": 10.36,
+          "confidence": 0.6792142436902533,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "Photos।"
+    },
+    {
+      "index": 7,
+      "start": 10.619,
+      "end": 11.719,
+      "words": [
+        {
+          "text": "शायद।",
+          "start": 10.619,
+          "end": 11.719,
+          "confidence": 0.9613403010249182,
+          "type": "word",
+          "language": "hi",
+          "keep": true
+        }
+      ],
+      "text": "शायद।"
+    }
+  ],
+  "trim": {
+    "cuts": 3,
+    "restored": 0,
+    "secondsRemoved": 4.06,
+    "trimmedDuration": 11.719
+  }
+}
