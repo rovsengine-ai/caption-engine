@@ -3,7 +3,7 @@ import { join, resolve, dirname, basename, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import type { CliOptions } from './args.js';
-import type { Transcript, Cut, TrimResult, ClipCandidate } from '../types.js';
+import type { Transcript, Cut, TrimResult, ClipCandidate, VisualAnalysisResult } from '../types.js';
 import { CaptionEngineError, InvalidTranscriptError, NoWordTimingsError } from '../errors.js';
 import { probeMedia, assertHasAudio, type MediaInfo } from '../media/probe.js';
 import { extractAudio } from '../media/extract.js';
@@ -653,6 +653,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       // must not be silently reused by the other.
       audioAnalysis: !opts.noAudioAnalysis,
       fillerConfidence: opts.fillerConfidence ?? null,
+      // A --cuts-in written with visual analysis on must not be silently
+      // reused by a run with it off, or vice versa — same reasoning as
+      // audioAnalysis above.
+      analyzeVideo: opts.analyzeVideo,
     });
 
     // Measured audio evidence. Local FFmpeg only — three extra passes over the
@@ -675,6 +679,30 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       log.info('--no-audio-analysis: using ASR gaps only (weaker evidence)');
     }
 
+    // Visual evidence (opt-in via --analyze-video). Samples frames locally with
+    // FFmpeg, then sends them to a Vision AI model. Unlike audio measurement,
+    // this makes real API calls, so it stays fully off unless requested.
+    let visualAnalysis: VisualAnalysisResult[] | null = null;
+    if (opts.analyzeVideo) {
+      log.step('Analyzing video frames');
+      if (!info.hasVideo) {
+        log.warn('input has no video stream — skipping --analyze-video.');
+      } else {
+        const key = process.env.ANTHROPIC_API_KEY;
+        if (!key) {
+          log.warn('ANTHROPIC_API_KEY not set — skipping video analysis.');
+        } else {
+          const { extractFrames } = await import('../media/video-analysis.js');
+          const { analyzeFrames, makeAnthropicVisionCompletion } = await import('../clips/vision.js');
+          const frames = await extractFrames(inputPath, workDir);
+          log.info(`${frames.length} frame(s) extracted (1 fps)`);
+          visualAnalysis = await analyzeFrames(frames, makeAnthropicVisionCompletion(key));
+          const rejected = visualAnalysis.filter((r) => !r.usable).length;
+          log.info(`${rejected} of ${visualAnalysis.length} frame(s) flagged as unusable footage`);
+        }
+      }
+    }
+
     const trimOptions = {
       ...DEFAULT_TRIM_OPTIONS,
       maxSilenceSec: opts.trimSilence,
@@ -685,6 +713,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       minFillerDurationSec: opts.minFillerDuration ?? DEFAULT_TRIM_OPTIONS.minFillerDurationSec,
       maxFillerDurationSec: opts.maxFillerDuration ?? DEFAULT_TRIM_OPTIONS.maxFillerDurationSec,
       fillerConfidence: opts.fillerConfidence ?? DEFAULT_TRIM_OPTIONS.fillerConfidence,
+      visualAnalysis,
     };
 
     // Evidence-only mode: print Pass 1 and stop. Nothing is cut, nothing is
@@ -796,7 +825,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     log.info(
       `${trim.cuts.length} cut(s) proposed, ${restored} restored, ${active.length} active`,
     );
-    for (const reason of ['silence', 'filler', 'false_start', 'low_confidence']) {
+    for (const reason of ['silence', 'filler', 'false_start', 'low_confidence', 'visual_reject']) {
       const e = byReason.get(reason);
       if (e) log.info(`   ${reason.padEnd(14)} ${String(e.n).padStart(3)} cut(s)  ${e.secs.toFixed(1)}s`);
     }

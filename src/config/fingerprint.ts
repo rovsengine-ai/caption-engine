@@ -160,6 +160,8 @@ export function cutsConfigHash(o: {
   audioAnalysis?: boolean;
   /** Pass 2 propose-cut vs review-required threshold. */
   fillerConfidence?: number | null;
+  /** Whether Vision AI frame analysis ran. Changes which cuts are proposed. */
+  analyzeVideo?: boolean;
 }): string {
   return configHash({
     trimSilence: o.trimSilence ?? null,
@@ -172,6 +174,8 @@ export function cutsConfigHash(o: {
     // fingerprint exists to prevent, so both settings belong in the key.
     audioAnalysis: o.audioAnalysis ?? null,
     fillerConfidence: o.fillerConfidence ?? null,
+    // Same reasoning: visual_reject cuts only exist when this ran.
+    analyzeVideo: o.analyzeVideo ?? false,
   });
 }
 

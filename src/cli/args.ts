@@ -98,6 +98,12 @@ export interface CliOptions {
   toneScope: 'cue' | 'word';
   /** Propose Auto Trim cuts and stop before rendering. */
   reviewCuts: boolean;
+  /**
+   * Sample video frames and use a Vision AI model to flag odd/unusable
+   * footage (speaker looking away, blurry, wild camera movement) as
+   * visual_reject cuts. Implies --auto-trim. Needs ANTHROPIC_API_KEY.
+   */
+  analyzeVideo: boolean;
   transcriptOut?: string;
   cutsIn?: string;
   cutsOut?: string;
@@ -253,6 +259,15 @@ AUTO TRIM
       --cuts-out <file>     Write the proposed cut list as JSON for review
       --cuts-in <file>      Apply a reviewed cut list (set "restored": true to keep a cut)
       --review-cuts         Propose cuts, write --cuts-out, then STOP before rendering
+      --analyze-video       Sample video frames (1/sec) and use a Vision AI model
+                            to flag odd/unusable footage — speaker looking away,
+                            blurry, covered, wild camera movement — as
+                            visual_reject cuts. Implies --auto-trim. Needs
+                            ANTHROPIC_API_KEY. Always review-required: these
+                            cuts are written to --cuts-out with "restored": true
+                            and are NOT applied until you flip that to false —
+                            unlike other cut types, a single Vision AI call has
+                            no second signal to corroborate it.
 
 ASR QUALITY (mixed Hindi-English)
       --code-switching      Tell the ASR to expect Hinglish and keep English in Latin.
@@ -307,6 +322,11 @@ EXAMPLES
   #   ...edit cuts.json, set "restored": true on anything to keep...
   caption-engine talk.mp4 --auto-trim --cuts-in cuts.json --output trimmed.mp4
 
+  # Auto Trim plus visual analysis (flags odd/unusable footage for review)
+  caption-engine talk.mp4 --auto-trim --analyze-video --cuts-out cuts.json --format json
+  #   ...edit cuts.json, set "restored": false on any visual_reject to cut it...
+  caption-engine talk.mp4 --auto-trim --cuts-in cuts.json --output trimmed.mp4
+
   # Reuse a transcript across several renders
   caption-engine v.mp4 --transcript-out t.json --format json
   caption-engine v.mp4 --transcript-in t.json --style neon --aspect square -o square.mp4
@@ -319,7 +339,7 @@ EXAMPLES
 
 ENVIRONMENT
   ELEVENLABS_API_KEY / DEEPGRAM_API_KEY / SARVAM_API_KEY
-  ANTHROPIC_API_KEY      for --clips
+  ANTHROPIC_API_KEY      for --clips and --analyze-video
   TRANSLITERATE_PROVIDER default backend for --script roman
   TRANSLITERATE_URL      endpoint for --transliterate http
   HINGLISH_GLOSSARY      default extra glossary file
@@ -406,6 +426,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
     codeSwitching: false,
     showDiagnostics: false,
     reviewCuts: false,
+    analyzeVideo: false,
     // 'error' preserves the pre-existing strict behaviour: asking for Roman and
     // getting native back must be something you opted into.
     romanFallback: 'error',
@@ -548,6 +569,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
         i++; break;
       case '--keyterms-file': o.keytermsFile = needValue(a, next); i++; break;
       case '--review-cuts': o.reviewCuts = true; o.autoTrim = true; break;
+      case '--analyze-video':
+      case '--analyse-video': o.analyzeVideo = true; o.autoTrim = true; break;
       case '--transcript-out': o.transcriptOut = needValue(a, next); i++; break;
       case '--cuts-in': o.cutsIn = needValue(a, next); i++; break;
       case '--cuts-out': o.cutsOut = needValue(a, next); i++; break;
