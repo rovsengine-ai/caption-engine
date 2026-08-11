@@ -1,4 +1,4 @@
-import type { Cut, CutReason, Transcript, TrimResult, Word } from '../types.js';
+import type { Cut, CutReason, Transcript, TrimResult, VisualAnalysisResult, Word } from '../types.js';
 import { matchFiller, normaliseToken } from './fillers.js';
 import type { AudioAnalysis } from '../media/audio-analysis.js';
 import { analyseFillerCandidates } from './analysis.js';
@@ -57,6 +57,15 @@ export interface TrimOptions {
   maxFillerDurationSec: number;
   /** Pass 2 verdicts below this are downgraded from propose-cut to review. */
   fillerConfidence: number;
+
+  // ---- Visual Auto Trim ----------------------------------------------------
+
+  /**
+   * Per-frame Vision AI verdicts, sampled at a fixed rate (see
+   * media/video-analysis.ts). Null disables visual cuts entirely — the
+   * default, and the only state a run without `--analyze-video` is in.
+   */
+  visualAnalysis: VisualAnalysisResult[] | null;
 }
 
 /**
@@ -88,6 +97,8 @@ export const DEFAULT_TRIM_OPTIONS: TrimOptions = {
   minFillerDurationSec: 0.06,
   maxFillerDurationSec: 2.0,
   fillerConfidence: 0.6,
+
+  visualAnalysis: null,
 };
 
 /**
@@ -338,6 +349,11 @@ export function autoTrim(
     }
   }
 
+  // ---- 5. Visual rejects (opt-in, via --analyze-video) -----------------------
+  if (opts.visualAnalysis) {
+    cuts.push(...visualRejectCuts(opts.visualAnalysis, nextId));
+  }
+
   cuts.sort((a, b) => a.start - b.start);
   // Filter BEFORE merging. Merging takes the minimum confidence of its parts,
   // so a suppressed low-confidence cut that had already been absorbed into a
@@ -499,6 +515,92 @@ function detectFalseStarts(
       }));
     }
   }
+  return cuts;
+}
+
+/**
+ * Confidence assigned to every visual_reject cut.
+ *
+ * Deliberately a flat, mid-range number rather than a computed score: unlike
+ * the filler pass, a Vision AI verdict here has no second, independent signal
+ * to corroborate it (see decide.ts's "no single signal may authorise a cut"
+ * rule) — one model call on one frame is exactly the case that rule exists
+ * for. The number only orders the review list; it does not gate whether the
+ * cut is shown, because every visual_reject is built with `restored: true`
+ * regardless of this value and is never auto-applied.
+ */
+const VISUAL_REJECT_CONFIDENCE = 0.5;
+
+/**
+ * Turn Vision AI's per-frame verdicts into cuts.
+ *
+ * Frames are sampled at a fixed rate; a single flagged frame says nothing
+ * cut-worthy on its own (a model can misfire on one frame), so this groups
+ * ADJACENT unusable frames into one cut spanning the run, rather than
+ * proposing a separate cut per sample. The sampling interval is inferred
+ * from the data itself (the gap between consecutive samples) so this has no
+ * hidden dependency on the fps the caller happened to extract at.
+ */
+function visualRejectCuts(
+  results: VisualAnalysisResult[],
+  nextId: (r: CutReason) => string,
+): Cut[] {
+  const sorted = [...results].sort((a, b) => a.timestampSec - b.timestampSec);
+  if (sorted.length === 0) return [];
+
+  // Median gap between consecutive samples — robust to a couple of missing
+  // frames without being thrown off by one large gap.
+  const gaps: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const g = sorted[i]!.timestampSec - sorted[i - 1]!.timestampSec;
+    if (g > 0) gaps.push(g);
+  }
+  gaps.sort((a, b) => a - b);
+  const interval = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)]! : 1;
+
+  const cuts: Cut[] = [];
+  let run: VisualAnalysisResult[] = [];
+
+  const flushRun = () => {
+    if (run.length === 0) return;
+    const start = run[0]!.timestampSec;
+    // Pad the end by one sampling interval: a rejected frame at t=5s with a
+    // 1s sampling rate represents the footage from t=5s up to (at least) t=6s,
+    // not a zero-width instant.
+    const end = run[run.length - 1]!.timestampSec + interval;
+    const reasons = [...new Set(run.map((r) => r.reason).filter(Boolean))];
+    cuts.push({
+      ...mkCut({
+        id: nextId('visual_reject'),
+        start,
+        end,
+        reason: 'visual_reject',
+        label: reasons.length > 0 ? `visual: ${reasons.join('; ')}` : 'visual: unusable footage',
+        wordIndices: [],
+        sourceWords: [],
+        confidence: VISUAL_REJECT_CONFIDENCE,
+      }),
+      restored: true,
+      decision: 'review-required',
+      decisionReason: reasons.join('; ') || 'flagged as unusable by video analysis',
+    });
+    run = [];
+  };
+
+  for (let i = 0; i < sorted.length; i++) {
+    const cur = sorted[i]!;
+    if (!cur.usable) {
+      const prev = run[run.length - 1];
+      // A gap bigger than ~1.5 sampling intervals means the run broke —
+      // there was a usable frame (or a missing sample) in between.
+      if (prev && cur.timestampSec - prev.timestampSec > interval * 1.5) flushRun();
+      run.push(cur);
+    } else {
+      flushRun();
+    }
+  }
+  flushRun();
+
   return cuts;
 }
 

@@ -80,7 +80,7 @@ export interface Transcript {
 // Auto Trim
 // ---------------------------------------------------------------------------
 
-export type CutReason = 'silence' | 'filler' | 'false_start' | 'low_confidence';
+export type CutReason = 'silence' | 'filler' | 'false_start' | 'low_confidence' | 'visual_reject';
 
 /** A proposed removal. Always reviewable — never applied silently. */
 export interface Cut {
@@ -219,4 +219,18 @@ export interface VideoMeta {
   durationSec: number;
   fps: number;
   hasAudio: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Video Analysis (visual Auto Trim)
+// ---------------------------------------------------------------------------
+
+/** A Vision AI model's verdict on one sampled frame. */
+export interface VisualAnalysisResult {
+  timestampSec: number;
+  /** False when the footage at this timestamp is odd/unusable (speaker looking
+   *  away, blurry, covered, wild camera movement). */
+  usable: boolean;
+  /** Short human-readable explanation, shown in the review list. */
+  reason: string;
 }
