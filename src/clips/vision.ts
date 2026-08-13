@@ -22,6 +22,13 @@ export type VisionComplete = (
 export interface VisionBatchOptions {
   /** Frames sent per Vision AI call. */
   batchSize?: number;
+  /**
+   * Called once per batch that fails (request error or unparseable response).
+   * Without this, a bad API key, wrong model name, or malformed response is
+   * indistinguishable from "every frame looked fine" — the caller just sees
+   * zero flagged frames either way.
+   */
+  onBatchError?: (error: unknown, batch: ExtractedFrame[]) => void;
 }
 
 export const DEFAULT_VISION_BATCH_SIZE = 10;
@@ -100,10 +107,20 @@ export async function analyzeFrames(
         mediaType: mediaTypeFor(f.path),
       }));
       const raw = await complete(images, buildVisualAnalysisPrompt(batch));
-      out.push(...parseVisualAnalysisResponse(raw, batch));
-    } catch {
+      const parsed = parseVisualAnalysisResponse(raw, batch);
+      if (parsed.length === 0) {
+        opts.onBatchError?.(
+          new Error(`Vision AI response for this batch had no parseable frame verdicts: ${raw.slice(0, 200)}`),
+          batch,
+        );
+      }
+      out.push(...parsed);
+    } catch (error) {
       // One bad batch shouldn't sink the whole job — a partial result set is
       // still useful, same tolerance findClips() applies to a bad LLM chunk.
+      // But it must be surfaced, or a systemic failure (bad key, wrong model,
+      // rate limit) silently looks identical to "no unusable frames found".
+      opts.onBatchError?.(error, batch);
       continue;
     }
   }
@@ -119,7 +136,7 @@ export async function analyzeFrames(
  */
 export function makeAnthropicVisionCompletion(
   apiKey: string,
-  model = 'claude-sonnet-4-5',
+  model = 'claude-sonnet-5',
 ): VisionComplete {
   return async (images, prompt): Promise<string> => {
     const content: Array<Record<string, unknown>> = images.map((img) => ({
@@ -158,6 +175,55 @@ export function makeAnthropicVisionCompletion(
     return (data.content ?? [])
       .filter((b) => b.type === 'text')
       .map((b) => b.text ?? '')
+      .join('');
+  };
+}
+
+/**
+ * Minimal Google Gemini vision client — a free-tier alternative to the
+ * Anthropic client above. Same `VisionComplete` shape, so it drops in
+ * anywhere the caller already expects one.
+ *
+ * Uses the Generative Language API directly (Google AI Studio key), not the
+ * Vertex AI SDK — one POST per batch, no extra dependency.
+ */
+export function makeGeminiVisionCompletion(
+  apiKey: string,
+  model = 'gemini-2.0-flash',
+): VisionComplete {
+  return async (images, prompt): Promise<string> => {
+    const parts: Array<Record<string, unknown>> = images.map((img) => ({
+      inline_data: { mime_type: img.mediaType, data: img.base64 },
+    }));
+    parts.push({ text: prompt });
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts }] }),
+      },
+    );
+
+    if (!res.ok) {
+      // Gemini's error body is { error: { message } }, same shape safeErrorDetail
+      // already parses for the Anthropic client.
+      const detail = await safeErrorDetail(res);
+      throw new CaptionEngineError(
+        `Video analysis request failed (${res.status}${detail ? `: ${detail}` : ''}).`,
+        res.status === 400 || res.status === 403
+          ? 'Check GEMINI_API_KEY.'
+          : 'Retry, or omit --analyze-video to skip visual analysis.',
+      );
+    }
+
+    const data = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    return (data.candidates ?? [])
+      .flatMap((c) => c.content?.parts ?? [])
+      .map((p) => p.text ?? '')
       .join('');
   };
 }
