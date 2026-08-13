@@ -5,7 +5,7 @@
         "text": "श्रा,",
         "start": 0.139,
         "end": 0.219,
-        "confidence": 0.18993784986642226,
+        "confidence": 0.14433753950661252,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -14,7 +14,7 @@
         "text": " ",
         "start": 0.219,
         "end": 0.219,
-        "confidence": 0.9996582246165773,
+        "confidence": 0.9995532840069266,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -23,7 +23,7 @@
         "text": "शादी",
         "start": 0.219,
         "end": 0.58,
-        "confidence": 0.9996582246165773,
+        "confidence": 0.9995532840069266,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -32,7 +32,7 @@
         "text": " ",
         "start": 0.58,
         "end": 0.659,
-        "confidence": 0.999940756491565,
+        "confidence": 0.9999437363807097,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -41,7 +41,7 @@
         "text": "का",
         "start": 0.659,
         "end": 0.779,
-        "confidence": 0.999940756491565,
+        "confidence": 0.9999437363807097,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -50,7 +50,7 @@
         "text": " ",
         "start": 0.779,
         "end": 0.839,
-        "confidence": 0.981483160635629,
+        "confidence": 0.9781230219252268,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -59,7 +59,7 @@
         "text": "घर",
         "start": 0.839,
         "end": 1.039,
-        "confidence": 0.981483160635629,
+        "confidence": 0.9781230219252268,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -68,7 +68,7 @@
         "text": " ",
         "start": 1.039,
         "end": 1.079,
-        "confidence": 0.9848110829284514,
+        "confidence": 0.9786829870569732,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -77,7 +77,7 @@
         "text": "में",
         "start": 1.08,
         "end": 1.239,
-        "confidence": 0.9848110829284514,
+        "confidence": 0.9786829870569732,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -86,7 +86,7 @@
         "text": " ",
         "start": 1.239,
         "end": 1.28,
-        "confidence": 0.983374924265771,
+        "confidence": 0.989552765119274,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -95,7 +95,7 @@
         "text": "नहीं",
         "start": 1.28,
         "end": 1.399,
-        "confidence": 0.983374924265771,
+        "confidence": 0.989552765119274,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -104,7 +104,7 @@
         "text": " ",
         "start": 1.399,
         "end": 1.439,
-        "confidence": 0.9991744425294605,
+        "confidence": 0.9993852582138143,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -113,7 +113,7 @@
         "text": "होता।",
         "start": 1.439,
         "end": 2.019,
-        "confidence": 0.9990696254672183,
+        "confidence": 0.9993063144959424,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -122,16 +122,16 @@
         "text": " ",
         "start": 2.019,
         "end": 2.059,
-        "confidence": 0.8936725996110535,
+        "confidence": 0.8778938893369994,
         "type": "spacing",
         "language": "hi",
         "keep": true
       },
       {
-        "text": "हां।",
+        "text": "हाँ।",
         "start": 2.06,
         "end": 3.099,
-        "confidence": 0.5289947067313697,
+        "confidence": 0.5913909826545312,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -140,7 +140,7 @@
         "text": " ",
         "start": 3.099,
         "end": 3.199,
-        "confidence": 0.8330286051712525,
+        "confidence": 0.9834515903274444,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -149,7 +149,7 @@
         "text": "ऐसी",
         "start": 3.199,
         "end": 3.48,
-        "confidence": 0.8651448491448592,
+        "confidence": 0.8518363883126205,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -158,7 +158,7 @@
         "text": " ",
         "start": 3.48,
         "end": 3.639,
-        "confidence": 0.9619918073249447,
+        "confidence": 0.966354790237109,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -167,7 +167,7 @@
         "text": "अभी",
         "start": 3.639,
         "end": 4.04,
-        "confidence": 0.9619918073249447,
+        "confidence": 0.966354790237109,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -176,7 +176,7 @@
         "text": " ",
         "start": 4.04,
         "end": 4.48,
-        "confidence": 0.9399162735809056,
+        "confidence": 0.9785862849145468,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -185,7 +185,7 @@
         "text": "हमारे",
         "start": 4.48,
         "end": 5.119,
-        "confidence": 0.9399162735809056,
+        "confidence": 0.9785862849145468,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -194,7 +194,7 @@
         "text": " ",
         "start": 5.119,
         "end": 5.259,
-        "confidence": 0.9987675853490352,
+        "confidence": 0.997939430560344,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -203,7 +203,7 @@
         "text": "videos",
         "start": 5.259,
         "end": 5.659,
-        "confidence": 0.9987675853490352,
+        "confidence": 0.997939430560344,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -212,7 +212,7 @@
         "text": " ",
         "start": 5.659,
         "end": 5.679,
-        "confidence": 0.9790937540745145,
+        "confidence": 0.9760303492163399,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -221,7 +221,7 @@
         "text": "and",
         "start": 5.679,
         "end": 5.879,
-        "confidence": 0.9790937540745145,
+        "confidence": 0.9760303492163399,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -230,7 +230,7 @@
         "text": " ",
         "start": 5.879,
         "end": 5.919,
-        "confidence": 0.9997276809372253,
+        "confidence": 0.9997772474618766,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -239,7 +239,7 @@
         "text": "photos",
         "start": 5.919,
         "end": 6.279,
-        "confidence": 0.9997276809372253,
+        "confidence": 0.9997772474618766,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -248,7 +248,7 @@
         "text": " ",
         "start": 6.279,
         "end": 6.359,
-        "confidence": 0.999717315487543,
+        "confidence": 0.9993968074343919,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -257,7 +257,7 @@
         "text": "आए",
         "start": 6.359,
         "end": 6.54,
-        "confidence": 0.999717315487543,
+        "confidence": 0.9993968074343919,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -266,7 +266,7 @@
         "text": " ",
         "start": 6.54,
         "end": 6.619,
-        "confidence": 0.9999570864969811,
+        "confidence": 0.9999554177126959,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -275,7 +275,7 @@
         "text": "थे",
         "start": 6.619,
         "end": 6.919,
-        "confidence": 0.9999570864969811,
+        "confidence": 0.9999554177126959,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -284,7 +284,7 @@
         "text": " ",
         "start": 6.919,
         "end": 7.259,
-        "confidence": 0.8353889161039629,
+        "confidence": 0.8794234172091389,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -293,7 +293,7 @@
         "text": "भैया",
         "start": 7.259,
         "end": 7.58,
-        "confidence": 0.8353889161039629,
+        "confidence": 0.8794234172091389,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -302,7 +302,7 @@
         "text": " ",
         "start": 7.58,
         "end": 7.659,
-        "confidence": 0.8494219150338165,
+        "confidence": 0.8633182652490476,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -311,7 +311,7 @@
         "text": "के",
         "start": 7.659,
         "end": 7.759,
-        "confidence": 0.8494219150338165,
+        "confidence": 0.8633182652490476,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -320,7 +320,7 @@
         "text": " ",
         "start": 7.759,
         "end": 7.839,
-        "confidence": 0.7833404491107384,
+        "confidence": 0.6418456936580444,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -329,7 +329,7 @@
         "text": "साथ।",
         "start": 7.84,
         "end": 9.42,
-        "confidence": 0.8326285384624608,
+        "confidence": 0.7170789623480063,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -338,7 +338,7 @@
         "text": " ",
         "start": 10.34,
         "end": 10.34,
-        "confidence": 0.7702397546265407,
+        "confidence": 0.5697175540767908,
         "type": "spacing",
         "language": "hi",
         "keep": false
@@ -347,7 +347,7 @@
         "text": "Photos।",
         "start": 9.679,
         "end": 10.36,
-        "confidence": 0.6792142436902533,
+        "confidence": 0.6884577563817365,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -356,7 +356,7 @@
         "text": " ",
         "start": 12.96,
         "end": 12.96,
-        "confidence": 0.7561836042122551,
+        "confidence": 0.7330076880570613,
         "type": "spacing",
         "language": "hi",
         "keep": false
@@ -365,7 +365,7 @@
         "text": "शायद।",
         "start": 10.619,
         "end": 11.719,
-        "confidence": 0.9613403010249182,
+        "confidence": 0.9594735533593005,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -384,7 +384,7 @@
         "text": "श्रा,",
         "start": 0.139,
         "end": 0.219,
-        "confidence": 0.18993784986642226,
+        "confidence": 0.14433753950661252,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -393,7 +393,7 @@
         "text": " ",
         "start": 0.219,
         "end": 0.219,
-        "confidence": 0.9996582246165773,
+        "confidence": 0.9995532840069266,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -402,7 +402,7 @@
         "text": "शादी",
         "start": 0.219,
         "end": 0.58,
-        "confidence": 0.9996582246165773,
+        "confidence": 0.9995532840069266,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -411,7 +411,7 @@
         "text": " ",
         "start": 0.58,
         "end": 0.659,
-        "confidence": 0.999940756491565,
+        "confidence": 0.9999437363807097,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -420,7 +420,7 @@
         "text": "का",
         "start": 0.659,
         "end": 0.779,
-        "confidence": 0.999940756491565,
+        "confidence": 0.9999437363807097,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -429,7 +429,7 @@
         "text": " ",
         "start": 0.779,
         "end": 0.839,
-        "confidence": 0.981483160635629,
+        "confidence": 0.9781230219252268,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -438,7 +438,7 @@
         "text": "घर",
         "start": 0.839,
         "end": 1.039,
-        "confidence": 0.981483160635629,
+        "confidence": 0.9781230219252268,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -447,7 +447,7 @@
         "text": " ",
         "start": 1.039,
         "end": 1.079,
-        "confidence": 0.9848110829284514,
+        "confidence": 0.9786829870569732,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -456,7 +456,7 @@
         "text": "में",
         "start": 1.08,
         "end": 1.239,
-        "confidence": 0.9848110829284514,
+        "confidence": 0.9786829870569732,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -465,7 +465,7 @@
         "text": " ",
         "start": 1.239,
         "end": 1.28,
-        "confidence": 0.983374924265771,
+        "confidence": 0.989552765119274,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -474,7 +474,7 @@
         "text": "नहीं",
         "start": 1.28,
         "end": 1.399,
-        "confidence": 0.983374924265771,
+        "confidence": 0.989552765119274,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -483,7 +483,7 @@
         "text": " ",
         "start": 1.399,
         "end": 1.439,
-        "confidence": 0.9991744425294605,
+        "confidence": 0.9993852582138143,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -492,7 +492,7 @@
         "text": "होता।",
         "start": 1.439,
         "end": 2.019,
-        "confidence": 0.9990696254672183,
+        "confidence": 0.9993063144959424,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -501,16 +501,16 @@
         "text": " ",
         "start": 2.019,
         "end": 2.059,
-        "confidence": 0.8936725996110535,
+        "confidence": 0.8778938893369994,
         "type": "spacing",
         "language": "hi",
         "keep": true
       },
       {
-        "text": "हां।",
+        "text": "हाँ।",
         "start": 2.06,
         "end": 3.099,
-        "confidence": 0.5289947067313697,
+        "confidence": 0.5913909826545312,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -519,7 +519,7 @@
         "text": " ",
         "start": 3.099,
         "end": 3.199,
-        "confidence": 0.8330286051712525,
+        "confidence": 0.9834515903274444,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -528,7 +528,7 @@
         "text": "ऐसी",
         "start": 3.199,
         "end": 3.48,
-        "confidence": 0.8651448491448592,
+        "confidence": 0.8518363883126205,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -537,7 +537,7 @@
         "text": " ",
         "start": 3.48,
         "end": 3.639,
-        "confidence": 0.9619918073249447,
+        "confidence": 0.966354790237109,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -546,7 +546,7 @@
         "text": "अभी",
         "start": 3.639,
         "end": 4.04,
-        "confidence": 0.9619918073249447,
+        "confidence": 0.966354790237109,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -555,7 +555,7 @@
         "text": " ",
         "start": 4.04,
         "end": 4.48,
-        "confidence": 0.9399162735809056,
+        "confidence": 0.9785862849145468,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -564,7 +564,7 @@
         "text": "हमारे",
         "start": 4.48,
         "end": 5.119,
-        "confidence": 0.9399162735809056,
+        "confidence": 0.9785862849145468,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -573,7 +573,7 @@
         "text": " ",
         "start": 5.119,
         "end": 5.259,
-        "confidence": 0.9987675853490352,
+        "confidence": 0.997939430560344,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -582,7 +582,7 @@
         "text": "videos",
         "start": 5.259,
         "end": 5.659,
-        "confidence": 0.9987675853490352,
+        "confidence": 0.997939430560344,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -591,7 +591,7 @@
         "text": " ",
         "start": 5.659,
         "end": 5.679,
-        "confidence": 0.9790937540745145,
+        "confidence": 0.9760303492163399,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -600,7 +600,7 @@
         "text": "and",
         "start": 5.679,
         "end": 5.879,
-        "confidence": 0.9790937540745145,
+        "confidence": 0.9760303492163399,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -609,7 +609,7 @@
         "text": " ",
         "start": 5.879,
         "end": 5.919,
-        "confidence": 0.9997276809372253,
+        "confidence": 0.9997772474618766,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -618,7 +618,7 @@
         "text": "photos",
         "start": 5.919,
         "end": 6.279,
-        "confidence": 0.9997276809372253,
+        "confidence": 0.9997772474618766,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -627,7 +627,7 @@
         "text": " ",
         "start": 6.279,
         "end": 6.359,
-        "confidence": 0.999717315487543,
+        "confidence": 0.9993968074343919,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -636,7 +636,7 @@
         "text": "आए",
         "start": 6.359,
         "end": 6.54,
-        "confidence": 0.999717315487543,
+        "confidence": 0.9993968074343919,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -645,7 +645,7 @@
         "text": " ",
         "start": 6.54,
         "end": 6.619,
-        "confidence": 0.9999570864969811,
+        "confidence": 0.9999554177126959,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -654,7 +654,7 @@
         "text": "थे",
         "start": 6.619,
         "end": 6.919,
-        "confidence": 0.9999570864969811,
+        "confidence": 0.9999554177126959,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -663,7 +663,7 @@
         "text": " ",
         "start": 6.919,
         "end": 7.259,
-        "confidence": 0.8353889161039629,
+        "confidence": 0.8794234172091389,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -672,7 +672,7 @@
         "text": "भैया",
         "start": 7.259,
         "end": 7.58,
-        "confidence": 0.8353889161039629,
+        "confidence": 0.8794234172091389,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -681,7 +681,7 @@
         "text": " ",
         "start": 7.58,
         "end": 7.659,
-        "confidence": 0.8494219150338165,
+        "confidence": 0.8633182652490476,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -690,7 +690,7 @@
         "text": "के",
         "start": 7.659,
         "end": 7.759,
-        "confidence": 0.8494219150338165,
+        "confidence": 0.8633182652490476,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -699,7 +699,7 @@
         "text": " ",
         "start": 7.759,
         "end": 7.839,
-        "confidence": 0.7833404491107384,
+        "confidence": 0.6418456936580444,
         "type": "spacing",
         "language": "hi",
         "keep": true
@@ -708,7 +708,7 @@
         "text": "साथ।",
         "start": 7.84,
         "end": 9.42,
-        "confidence": 0.8326285384624608,
+        "confidence": 0.7170789623480063,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -717,7 +717,7 @@
         "text": " ",
         "start": 10.34,
         "end": 10.34,
-        "confidence": 0.7702397546265407,
+        "confidence": 0.5697175540767908,
         "type": "spacing",
         "language": "hi",
         "keep": false
@@ -726,7 +726,7 @@
         "text": "Photos।",
         "start": 9.679,
         "end": 10.36,
-        "confidence": 0.6792142436902533,
+        "confidence": 0.6884577563817365,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -735,7 +735,7 @@
         "text": " ",
         "start": 12.96,
         "end": 12.96,
-        "confidence": 0.7561836042122551,
+        "confidence": 0.7330076880570613,
         "type": "spacing",
         "language": "hi",
         "keep": false
@@ -744,7 +744,7 @@
         "text": "शायद।",
         "start": 10.619,
         "end": 11.719,
-        "confidence": 0.9613403010249182,
+        "confidence": 0.9594735533593005,
         "type": "word",
         "language": "hi",
         "keep": true
@@ -767,7 +767,7 @@
           "text": "श्रा,",
           "start": 0.139,
           "end": 0.219,
-          "confidence": 0.18993784986642226,
+          "confidence": 0.14433753950661252,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -776,7 +776,7 @@
           "text": "शादी",
           "start": 0.219,
           "end": 0.58,
-          "confidence": 0.9996582246165773,
+          "confidence": 0.9995532840069266,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -785,7 +785,7 @@
           "text": "का",
           "start": 0.659,
           "end": 0.779,
-          "confidence": 0.999940756491565,
+          "confidence": 0.9999437363807097,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -794,7 +794,7 @@
           "text": "घर",
           "start": 0.839,
           "end": 1.039,
-          "confidence": 0.981483160635629,
+          "confidence": 0.9781230219252268,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -811,7 +811,7 @@
           "text": "में",
           "start": 1.08,
           "end": 1.239,
-          "confidence": 0.9848110829284514,
+          "confidence": 0.9786829870569732,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -820,7 +820,7 @@
           "text": "नहीं",
           "start": 1.28,
           "end": 1.399,
-          "confidence": 0.983374924265771,
+          "confidence": 0.989552765119274,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -829,7 +829,7 @@
           "text": "होता।",
           "start": 1.439,
           "end": 2.019,
-          "confidence": 0.9990696254672183,
+          "confidence": 0.9993063144959424,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -843,16 +843,16 @@
       "end": 3.099,
       "words": [
         {
-          "text": "हां।",
+          "text": "हाँ।",
           "start": 2.06,
           "end": 3.099,
-          "confidence": 0.5289947067313697,
+          "confidence": 0.5913909826545312,
           "type": "word",
           "language": "hi",
           "keep": true
         }
       ],
-      "text": "हां।"
+      "text": "हाँ।"
     },
     {
       "index": 3,
@@ -863,7 +863,7 @@
           "text": "ऐसी",
           "start": 3.199,
           "end": 3.48,
-          "confidence": 0.8651448491448592,
+          "confidence": 0.8518363883126205,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -872,7 +872,7 @@
           "text": "अभी",
           "start": 3.639,
           "end": 4.04,
-          "confidence": 0.9619918073249447,
+          "confidence": 0.966354790237109,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -881,7 +881,7 @@
           "text": "हमारे",
           "start": 4.48,
           "end": 5.119,
-          "confidence": 0.9399162735809056,
+          "confidence": 0.9785862849145468,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -890,7 +890,7 @@
           "text": "videos",
           "start": 5.259,
           "end": 5.659,
-          "confidence": 0.9987675853490352,
+          "confidence": 0.997939430560344,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -907,7 +907,7 @@
           "text": "and",
           "start": 5.679,
           "end": 5.879,
-          "confidence": 0.9790937540745145,
+          "confidence": 0.9760303492163399,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -916,7 +916,7 @@
           "text": "photos",
           "start": 5.919,
           "end": 6.279,
-          "confidence": 0.9997276809372253,
+          "confidence": 0.9997772474618766,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -925,7 +925,7 @@
           "text": "आए",
           "start": 6.359,
           "end": 6.54,
-          "confidence": 0.999717315487543,
+          "confidence": 0.9993968074343919,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -934,7 +934,7 @@
           "text": "थे",
           "start": 6.619,
           "end": 6.919,
-          "confidence": 0.9999570864969811,
+          "confidence": 0.9999554177126959,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -951,7 +951,7 @@
           "text": "भैया",
           "start": 7.259,
           "end": 7.58,
-          "confidence": 0.8353889161039629,
+          "confidence": 0.8794234172091389,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -960,7 +960,7 @@
           "text": "के",
           "start": 7.659,
           "end": 7.759,
-          "confidence": 0.8494219150338165,
+          "confidence": 0.8633182652490476,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -969,7 +969,7 @@
           "text": "साथ।",
           "start": 7.84,
           "end": 9.42,
-          "confidence": 0.8326285384624608,
+          "confidence": 0.7170789623480063,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -986,7 +986,7 @@
           "text": "Photos।",
           "start": 9.679,
           "end": 10.36,
-          "confidence": 0.6792142436902533,
+          "confidence": 0.6884577563817365,
           "type": "word",
           "language": "hi",
           "keep": true
@@ -1003,7 +1003,7 @@
           "text": "शायद।",
           "start": 10.619,
           "end": 11.719,
-          "confidence": 0.9613403010249182,
+          "confidence": 0.9594735533593005,
           "type": "word",
           "language": "hi",
           "keep": true

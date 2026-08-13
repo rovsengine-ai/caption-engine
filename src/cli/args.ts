@@ -101,9 +101,16 @@ export interface CliOptions {
   /**
    * Sample video frames and use a Vision AI model to flag odd/unusable
    * footage (speaker looking away, blurry, wild camera movement) as
-   * visual_reject cuts. Implies --auto-trim. Needs ANTHROPIC_API_KEY.
+   * visual_reject cuts. Implies --auto-trim. Needs ANTHROPIC_API_KEY or
+   * GEMINI_API_KEY, depending on --vision-provider.
    */
   analyzeVideo: boolean;
+  /**
+   * Which Vision AI backend --analyze-video calls. Explicit flag always
+   * wins; otherwise picked from whichever API key is set (Anthropic
+   * preferred when both are present, for backward compatibility).
+   */
+  visionProvider?: 'anthropic' | 'gemini';
   transcriptOut?: string;
   cutsIn?: string;
   cutsOut?: string;
@@ -263,11 +270,16 @@ AUTO TRIM
                             to flag odd/unusable footage — speaker looking away,
                             blurry, covered, wild camera movement — as
                             visual_reject cuts. Implies --auto-trim. Needs
-                            ANTHROPIC_API_KEY. Always review-required: these
+                            ANTHROPIC_API_KEY or GEMINI_API_KEY (see
+                            --vision-provider). Always review-required: these
                             cuts are written to --cuts-out with "restored": true
                             and are NOT applied until you flip that to false —
                             unlike other cut types, a single Vision AI call has
                             no second signal to corroborate it.
+      --vision-provider <p> anthropic | gemini   (default: whichever API key is
+                            set; anthropic wins if both are)
+                            gemini uses Google AI Studio's free tier —
+                            GEMINI_API_KEY, no charge for light use.
 
 ASR QUALITY (mixed Hindi-English)
       --code-switching      Tell the ASR to expect Hinglish and keep English in Latin.
@@ -339,7 +351,8 @@ EXAMPLES
 
 ENVIRONMENT
   ELEVENLABS_API_KEY / DEEPGRAM_API_KEY / SARVAM_API_KEY
-  ANTHROPIC_API_KEY      for --clips and --analyze-video
+  ANTHROPIC_API_KEY      for --clips and --analyze-video (Anthropic provider)
+  GEMINI_API_KEY         for --analyze-video (Gemini provider — free tier)
   TRANSLITERATE_PROVIDER default backend for --script roman
   TRANSLITERATE_URL      endpoint for --transliterate http
   HINGLISH_GLOSSARY      default extra glossary file
@@ -571,6 +584,19 @@ export function parseArgs(argv: string[]): ParsedCommand {
       case '--review-cuts': o.reviewCuts = true; o.autoTrim = true; break;
       case '--analyze-video':
       case '--analyse-video': o.analyzeVideo = true; o.autoTrim = true; break;
+      case '--vision-provider': {
+        const v = (next ?? '').toLowerCase();
+        if (v !== 'anthropic' && v !== 'gemini') {
+          throw new CaptionEngineError(
+            `--vision-provider must be anthropic or gemini (got "${next ?? ''}").`,
+            'anthropic  needs ANTHROPIC_API_KEY\n' +
+              'gemini     needs GEMINI_API_KEY (free tier via Google AI Studio)',
+          );
+        }
+        o.visionProvider = v;
+        i++;
+        break;
+      }
       case '--transcript-out': o.transcriptOut = needValue(a, next); i++; break;
       case '--cuts-in': o.cutsIn = needValue(a, next); i++; break;
       case '--cuts-out': o.cutsOut = needValue(a, next); i++; break;

@@ -688,19 +688,37 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       if (!info.hasVideo) {
         log.warn('input has no video stream — skipping --analyze-video.');
       } else {
-        const key = process.env.ANTHROPIC_API_KEY;
-        if (!key) {
-          log.warn('ANTHROPIC_API_KEY not set — skipping video analysis.');
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        const geminiKey = process.env.GEMINI_API_KEY;
+        // Explicit flag always wins. Otherwise pick from whichever key is
+        // set — Anthropic first when both are present, so existing setups
+        // that already export ANTHROPIC_API_KEY keep behaving as before.
+        const provider = opts.visionProvider
+          ?? (anthropicKey ? 'anthropic' : geminiKey ? 'gemini' : undefined);
+
+        if (!provider) {
+          log.warn(
+            'no Vision API key set (ANTHROPIC_API_KEY or GEMINI_API_KEY) — skipping video analysis.',
+          );
+        } else if (provider === 'anthropic' && !anthropicKey) {
+          log.warn('--vision-provider anthropic requires ANTHROPIC_API_KEY — skipping video analysis.');
+        } else if (provider === 'gemini' && !geminiKey) {
+          log.warn('--vision-provider gemini requires GEMINI_API_KEY — skipping video analysis.');
         } else {
           const { extractFrames } = await import('../media/video-analysis.js');
-          const { analyzeFrames, makeAnthropicVisionCompletion } = await import('../clips/vision.js');
+          const { analyzeFrames, makeAnthropicVisionCompletion, makeGeminiVisionCompletion } =
+            await import('../clips/vision.js');
           const frames = await extractFrames(inputPath, workDir);
           log.info(`${frames.length} frame(s) extracted (1 fps)`);
           if (frames.length === 0) {
             log.warn('no frames were extracted — check that the input actually has a readable video stream.');
           }
+          log.info(`vision provider: ${provider}`);
+          const complete = provider === 'anthropic'
+            ? makeAnthropicVisionCompletion(anthropicKey!)
+            : makeGeminiVisionCompletion(geminiKey!);
           let batchErrors = 0;
-          visualAnalysis = await analyzeFrames(frames, makeAnthropicVisionCompletion(key), {
+          visualAnalysis = await analyzeFrames(frames, complete, {
             onBatchError: (error) => {
               batchErrors++;
               log.warn(`video analysis batch failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -178,3 +178,52 @@ export function makeAnthropicVisionCompletion(
       .join('');
   };
 }
+
+/**
+ * Minimal Google Gemini vision client — a free-tier alternative to the
+ * Anthropic client above. Same `VisionComplete` shape, so it drops in
+ * anywhere the caller already expects one.
+ *
+ * Uses the Generative Language API directly (Google AI Studio key), not the
+ * Vertex AI SDK — one POST per batch, no extra dependency.
+ */
+export function makeGeminiVisionCompletion(
+  apiKey: string,
+  model = 'gemini-2.0-flash',
+): VisionComplete {
+  return async (images, prompt): Promise<string> => {
+    const parts: Array<Record<string, unknown>> = images.map((img) => ({
+      inline_data: { mime_type: img.mediaType, data: img.base64 },
+    }));
+    parts.push({ text: prompt });
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts }] }),
+      },
+    );
+
+    if (!res.ok) {
+      // Gemini's error body is { error: { message } }, same shape safeErrorDetail
+      // already parses for the Anthropic client.
+      const detail = await safeErrorDetail(res);
+      throw new CaptionEngineError(
+        `Video analysis request failed (${res.status}${detail ? `: ${detail}` : ''}).`,
+        res.status === 400 || res.status === 403
+          ? 'Check GEMINI_API_KEY.'
+          : 'Retry, or omit --analyze-video to skip visual analysis.',
+      );
+    }
+
+    const data = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    return (data.candidates ?? [])
+      .flatMap((c) => c.content?.parts ?? [])
+      .map((p) => p.text ?? '')
+      .join('');
+  };
+}
