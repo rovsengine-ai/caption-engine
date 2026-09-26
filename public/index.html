@@ -1,202 +1,516 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Caption Engine</title>
-  <meta name="description" content="Premium word-timed captions for Indic and Hinglish video. Zero browser storage." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Caption Engine — The only captioning tool you always needed</title>
+<meta name="description" content="14 Indian languages. 68 international. Word-timed captions, viral templates, and an Auto Trim that cuts the bluff and keeps the best take. Zero browser storage." />
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/shared.css" />
+<link rel="stylesheet" href="/css/landing.css" />
 </head>
-<body>
-  <div class="bg-glow" aria-hidden="true"></div>
-  <div class="app">
-    <header class="hero">
-      <div class="brand-block">
-        <div class="logo" aria-hidden="true">
-          <span class="logo-bar"></span>
-          <span class="logo-bar short"></span>
-          <span class="logo-bar"></span>
-        </div>
-        <div>
-          <p class="eyebrow">Caption Engine</p>
-          <h1>Ship word-timed captions that actually shape Indic scripts.</h1>
-          <p class="lede">Upload once. Preview instantly. Sarvam AI first, ElevenLabs fallback. Nothing persists in your browser.</p>
-        </div>
-      </div>
-      <div class="hero-badges">
-        <span class="chip accent">Zero browser storage</span>
-        <span class="chip">Sarvam → ElevenLabs</span>
-        <span class="chip">FFmpeg · HarfBuzz · resvg</span>
-      </div>
-    </header>
+<body class="landing">
+<div class="bg-ambient" aria-hidden="true"><div class="grid-overlay"></div></div>
 
-    <main class="grid">
-      <!-- Upload / preview -->
-      <section class="glass panel preview-panel">
-        <div class="panel-title">
-          <h2>Media</h2>
-          <span id="file-meta" class="meta-pill" hidden></span>
-        </div>
+<!-- ============================== NAV ============================== -->
+<nav class="site-nav">
+  <a href="/" class="nav-brand">
+    <span class="nav-logo-mark">CE</span>
+    <span>Caption Engine</span>
+  </a>
 
-        <div
-          id="dropzone"
-          class="dropzone"
-          tabindex="0"
-          role="button"
-          aria-label="Drop a video here or choose a file"
-        >
-          <input id="file-input" type="file" accept="video/*,audio/*,.mp4,.mov,.mkv,.webm,.wav,.mp3,.m4a" hidden />
-          <div id="drop-empty" class="drop-empty">
-            <div class="drop-icon" aria-hidden="true"></div>
-            <strong>Drop your video</strong>
-            <span>or click to browse · kept in memory only until you generate</span>
-          </div>
-          <div id="preview-wrap" class="preview-wrap" hidden>
-            <video id="preview" class="preview" playsinline controls></video>
-          </div>
-        </div>
+  <button class="btn btn-icon btn-ghost nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
 
-        <div class="row-actions">
-          <button type="button" id="btn-clear" class="btn ghost" disabled>Clear</button>
-          <button type="button" id="btn-pick" class="btn soft">Choose file</button>
-        </div>
-      </section>
-
-      <!-- Options -->
-      <section class="glass panel options-panel">
-        <div class="panel-title">
-          <h2>Caption options</h2>
-        </div>
-
-        <form id="options-form" class="options">
-          <label class="field">
-            <span class="label">Language</span>
-            <div class="select-wrap">
-              <select id="language" name="language"></select>
-            </div>
-          </label>
-
-          <div class="field">
-            <span class="label">Script</span>
-            <div id="script-pills" class="segmented" role="radiogroup" aria-label="Script">
-              <button type="button" class="seg active" data-value="native">Native</button>
-              <button type="button" class="seg" data-value="roman">Hinglish / Roman</button>
-            </div>
-            <input type="hidden" id="script" name="script" value="native" />
-          </div>
-
-          <label class="field">
-            <span class="label">Style</span>
-            <div class="select-wrap">
-              <select id="style" name="style"></select>
-            </div>
-          </label>
-
-          <div class="field">
-            <span class="label">Aspect ratio</span>
-            <div id="aspect-pills" class="segmented wrap" role="radiogroup" aria-label="Aspect">
-              <button type="button" class="seg active" data-value="portrait">Portrait</button>
-              <button type="button" class="seg" data-value="landscape">Landscape</button>
-              <button type="button" class="seg" data-value="square">Square</button>
-              <button type="button" class="seg" data-value="original">Original</button>
-            </div>
-            <input type="hidden" id="aspect" name="aspect" value="portrait" />
-          </div>
-
-          <label class="field">
-            <span class="label">
-              ASR provider
-              <span class="badge">Sarvam + fallback</span>
-            </span>
-            <div class="select-wrap">
-              <select id="provider" name="provider"></select>
-            </div>
-            <p id="provider-hint" class="hint"></p>
-          </label>
-
-          <fieldset class="field formats">
-            <legend class="label">Outputs</legend>
-            <div class="format-grid">
-              <label class="check"><input type="checkbox" name="formats" value="mp4" checked /><span>MP4</span></label>
-              <label class="check"><input type="checkbox" name="formats" value="srt" /><span>SRT</span></label>
-              <label class="check"><input type="checkbox" name="formats" value="ass" /><span>ASS</span></label>
-              <label class="check"><input type="checkbox" name="formats" value="json" /><span>JSON</span></label>
-            </div>
-          </fieldset>
-
-          <label class="switch">
-            <input type="checkbox" id="auto-trim" name="autoTrim" />
-            <span class="track" aria-hidden="true"></span>
-            <span class="switch-copy">
-              <strong>Auto Trim</strong>
-              <small>Cut silence and filler words</small>
-            </span>
-          </label>
-
-          <label class="switch">
-            <input type="checkbox" id="code-switching" name="codeSwitching" />
-            <span class="track" aria-hidden="true"></span>
-            <span class="switch-copy">
-              <strong>Code-switching</strong>
-              <small>Keep English in Latin for Hinglish</small>
-            </span>
-          </label>
-
-          <button type="submit" id="btn-generate" class="btn primary" disabled>
-            <span>Generate captions</span>
-          </button>
-        </form>
-      </section>
-
-      <!-- Progress -->
-      <section class="glass panel progress-panel">
-        <div class="panel-title">
-          <h2>Live progress</h2>
-          <span id="job-status" class="status idle">Idle</span>
-        </div>
-
-        <div class="progress-shell">
-          <div class="progress-track">
-            <div id="progress-bar" class="progress-bar"></div>
-          </div>
-          <div class="progress-meta">
-            <p id="progress-label">Waiting for media…</p>
-            <span id="progress-pct">0%</span>
-          </div>
-        </div>
-
-        <div id="upload-progress" class="upload-banner" hidden>
-          <span>Uploading to secure temp job</span>
-          <strong id="upload-pct">0%</strong>
-        </div>
-
-        <details id="log-details" class="terminal" open>
-          <summary>
-            <span>Pipeline log</span>
-            <span class="summary-hint">click to collapse</span>
-          </summary>
-          <ol id="log" class="log" aria-live="polite"></ol>
-        </details>
-
-        <div id="downloads" class="downloads" hidden>
-          <h3>Your files</h3>
-          <div id="download-links" class="download-grid"></div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="foot">
-      <p>
-        Client privacy: your file stays as an in-memory <code>File</code>. Preview uses
-        <code>URL.createObjectURL</code> and is revoked on clear. No
-        <code>localStorage</code>, IndexedDB, Cache API, or OPFS.
-        Server temps are wiped in <code>try…finally</code> after each job.
-      </p>
-    </footer>
+  <div class="nav-links" role="navigation" aria-label="Primary">
+    <a class="nav-link" href="#languages">Languages</a>
+    <a class="nav-link" href="#templates">Templates</a>
+    <a class="nav-link" href="#auto-trim">Auto Trim</a>
+    <a class="nav-link" href="#pricing">Pricing</a>
+    <a class="nav-link" href="#plugins">Plugins</a>
+    <a class="nav-link" href="#creators">Creators (earn) <span class="tag-beta">BETA</span></a>
   </div>
-  <script type="module" src="/app.js"></script>
+
+  <div class="nav-actions">
+    <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle dark / light theme" aria-pressed="false">
+      <span class="knob">🌙</span>
+    </button>
+    <a href="/app" class="btn btn-outline btn-sm">Open App</a>
+    <button class="profile-stub" type="button" aria-label="Account menu" title="Account">C</button>
+  </div>
+</nav>
+
+<!-- ============================== HERO ============================== -->
+<header class="hero">
+  <div class="hero-badge" data-reveal>
+    <span class="pip">NEW</span>
+    <span>Sarvam AI + ElevenLabs fallback ASR, merged automatically</span>
+  </div>
+
+  <h1 data-reveal>The only captioning tool<br>you <span class="accent-word">always needed.</span></h1>
+
+  <p class="sub" data-reveal>
+    <strong>14 Indian languages. 68 international.</strong> One tool that shapes real Indic scripts,
+    trims your rambling, and drops viral-ready captions — without ever storing your video anywhere but memory.
+  </p>
+
+  <div class="hero-ctas" data-reveal>
+    <a href="/app" class="btn btn-primary btn-lg">Start captioning free →</a>
+    <a href="#templates" class="btn btn-outline btn-lg">See templates</a>
+  </div>
+
+  <div class="hero-note" data-reveal>
+    <span class="dot"></span> No card required · Video never touches a browser database · Export in minutes
+  </div>
+
+  <div class="social-proof glass" data-reveal>
+    <div class="stat"><strong>82+</strong><span>Total languages</span></div>
+    <div class="divider"></div>
+    <div class="stat"><strong>14</strong><span>Indian languages</span></div>
+    <div class="divider"></div>
+    <div class="stat"><strong>1,900+</strong><span>Clips captioned today</span></div>
+    <div class="divider"></div>
+    <div class="stat"><strong>3</strong><span>ASR providers merged</span></div>
+  </div>
+
+  <div class="hero-visual" data-reveal>
+    <div class="hero-visual-inner">
+      <div class="hero-visual-bar">
+        <span></span><span></span><span></span>
+        <span class="url">captionengine.app/app/p/8f2c…</span>
+      </div>
+      <div class="hero-visual-body">
+        <div style="display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg-2);">
+          <div class="phone">
+            <div class="phone-screen"></div>
+            <div class="phone-caption-stage">
+              <p class="phone-caption" data-caption-cycle>ye edit dekh, next level hai</p>
+            </div>
+            <div class="phone-progress-dots" data-caption-dots>
+              <span class="active"></span><span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+        </div>
+        <div style="padding:26px 30px;display:flex;flex-direction:column;gap:14px;justify-content:center;">
+          <div class="chip" style="align-self:flex-start;">⚡ Auto Trim removed 1m 25s of silence</div>
+          <div class="chip" style="align-self:flex-start;">🎯 Style: Active Box · Aspect 9:16</div>
+          <div class="chip" style="align-self:flex-start;">🈶 Hinglish code-switching kept English in Latin</div>
+          <div class="chip" style="align-self:flex-start;">✅ Ready — MP4, SRT, ASS exported</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============================== LANGUAGES ============================== -->
+<section class="section" id="languages">
+  <div class="section-inner">
+    <div class="section-head" data-reveal>
+      <span class="badge badge-accent badge-dot">Language engine</span>
+      <h2>Native script in. Native script out.</h2>
+      <p>Real Devanagari, Tamil, Telugu, Bengali shaping — not transliteration guesses. Flip to Hinglish / Roman anytime, word by word.</p>
+    </div>
+
+    <div class="languages-layout">
+      <div data-reveal data-tab-group>
+        <div class="lang-tabs tabs">
+          <button class="tab active" data-tab-target="indian">Indian · transliterated</button>
+          <button class="tab" data-tab-target="intl">International</button>
+        </div>
+
+        <div class="lang-panel active" data-tab-panel="indian">
+          <div class="lang-grid">
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">हिन्दी</span><span class="roman">Hindi · hi</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">मराठी</span><span class="roman">Marathi · mr</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">తెలుగు</span><span class="roman">Telugu · te</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">ಕನ್ನಡ</span><span class="roman">Kannada · kn</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">தமிழ்</span><span class="roman">Tamil · ta</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">മലയാളം</span><span class="roman">Malayalam · ml</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">বাংলা</span><span class="roman">Bengali · bn</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">ગુજરાતી</span><span class="roman">Gujarati · gu</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">ਪੰਜਾਬੀ</span><span class="roman">Punjabi · pa</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">ଓଡ଼ିଆ</span><span class="roman">Odia · or</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">اردو</span><span class="roman">Urdu · ur</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">অসমীয়া</span><span class="roman">Assamese · as</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">नेपाली</span><span class="roman">Nepali · ne</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">English</span><span class="roman">India · en</span></span></div>
+          </div>
+        </div>
+
+        <div class="lang-panel" data-tab-panel="intl">
+          <div class="lang-grid">
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Español</span><span class="roman">Spanish</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Français</span><span class="roman">French</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Deutsch</span><span class="roman">German</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Português</span><span class="roman">Portuguese</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">日本語</span><span class="roman">Japanese</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">한국어</span><span class="roman">Korean</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">العربية</span><span class="roman">Arabic</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Русский</span><span class="roman">Russian</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Italiano</span><span class="roman">Italian</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Indonesia</span><span class="roman">Indonesian</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Tiếng Việt</span><span class="roman">Vietnamese</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Türkçe</span><span class="roman">Turkish</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Nederlands</span><span class="roman">Dutch</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">ไทย</span><span class="roman">Thai</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Polski</span><span class="roman">Polish</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">Svenska</span><span class="roman">Swedish</span></span></div>
+            <div class="lang-card"><span class="flag-dot"></span><span><span class="native">+52 more</span><span class="roman">and counting</span></span></div>
+          </div>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric-card glass"><strong>82+</strong><span>Languages total</span></div>
+          <div class="metric-card glass"><strong>14</strong><span>Indian languages</span></div>
+          <div class="metric-card glass"><strong>1,900+</strong><span>Clips captioned today</span></div>
+          <div class="metric-card glass"><strong>3</strong><span>ASR providers merged</span></div>
+        </div>
+      </div>
+
+      <div class="phone" data-reveal>
+        <div class="phone-screen"></div>
+        <div class="phone-caption-stage">
+          <p class="phone-caption" data-caption-cycle>यह वाला बहुत ज़्यादा वायरल होगा</p>
+        </div>
+        <div class="phone-progress-dots" data-caption-dots>
+          <span class="active"></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== TEMPLATES ============================== -->
+<section class="section section-alt" id="templates">
+  <div class="section-inner">
+    <div class="section-head" data-reveal>
+      <span class="badge badge-accent badge-dot">Caption styles</span>
+      <h2>Templates built for the feed, not the timeline.</h2>
+      <p>Every template ships with real word-level animation — active-word highlight, kinetic motion, and script-aware shaping baked in.</p>
+    </div>
+
+    <div class="template-grid">
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-ink-flow" style="--tpl-glow: rgba(45,212,191,0.28)">
+          <p class="sample-text" style="font-size:22px;">ye kaam<br>kar gaya</p>
+        </div>
+        <div class="template-meta"><strong>Ink Flow</strong><span>Cursive energy, soft glow</span>
+          <div class="tpl-tags"><span class="tag">Subtle motion</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-script-duo" style="--tpl-glow: rgba(34,211,238,0.26)">
+          <p class="sample-text" style="font-size:20px;">HONESTLY<br><small>the best take</small></p>
+        </div>
+        <div class="template-meta"><strong>Script Duo</strong><span>Bold sans + script accent</span>
+          <div class="tpl-tags"><span class="tag">Subtle motion</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-type-stairs" style="--tpl-glow: rgba(45,212,191,0.24)">
+          <p class="sample-text"><span>this</span><span>changes</span><span>everything</span></p>
+        </div>
+        <div class="template-meta"><strong>Type Stairs</strong><span>Stepped typographic stack</span>
+          <div class="tpl-tags"><span class="tag">Expressive</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-slice-glow" style="--tpl-glow: rgba(34,211,238,0.35)">
+          <p class="sample-text" style="font-size:22px;">SLICE<br>&amp; GLOW</p>
+        </div>
+        <div class="template-meta"><strong>Slice Glow</strong><span>Neon sliced glow</span>
+          <div class="tpl-tags"><span class="tag">Expressive</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-zyada" style="--tpl-glow: rgba(52,211,153,0.28)">
+          <p class="sample-text" style="font-size:26px;">ZYADA</p>
+        </div>
+        <div class="template-meta"><strong>Zyada</strong><span>Hyper clean green outline</span>
+          <div class="tpl-tags"><span class="tag">Subtle motion</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-editorial" style="--tpl-glow: rgba(255,255,255,0.08)">
+          <p class="sample-text">The Real<br>Story Here</p>
+        </div>
+        <div class="template-meta"><strong>Editorial</strong><span>Magazine-clean serif / sans</span>
+          <div class="tpl-tags"><span class="tag">No motion</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-pop-viral" style="--tpl-glow: rgba(255,45,120,0.25)">
+          <p class="sample-text" style="font-size:24px;">NO WAY 😱</p>
+        </div>
+        <div class="template-meta"><strong>Pop Viral</strong><span>High-impact active word pop</span>
+          <div class="tpl-tags"><span class="tag">Expressive</span></div>
+        </div>
+      </article>
+
+      <article class="template-card" data-reveal>
+        <div class="template-preview tpl-active-box" style="--tpl-glow: rgba(45,212,191,0.3)">
+          <p class="sample-text" style="font-size:18px;color:#fff;">this is <span>the part</span></p>
+        </div>
+        <div class="template-meta"><strong>Active Box</strong><span>Pill behind spoken word</span>
+          <div class="tpl-tags"><span class="tag">Subtle motion</span></div>
+        </div>
+      </article>
+    </div>
+
+    <div style="text-align:center;margin-top:36px;" data-reveal>
+      <a href="/app" class="btn btn-outline">Browse all 16 templates in the editor →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== AUTO TRIM ============================== -->
+<section class="section" id="auto-trim">
+  <div class="section-inner autotrim-layout">
+    <div class="trim-copy" data-reveal>
+      <span class="badge badge-accent badge-dot">Auto Trim</span>
+      <h2>It cuts the bluff.<br>Keeps the best take.</h2>
+      <p>Silence, filler words, false starts, dead air — gone. Every cut stays reviewable, and one click restores anything the algorithm got wrong.</p>
+      <ul class="trim-bullets">
+        <li><span class="ic">✓</span> Removes um/uh/matlab-style fillers per language, not a blunt profanity filter</li>
+        <li><span class="ic">✓</span> Detects false starts and repeated takes, keeps only the clean read</li>
+        <li><span class="ic">✓</span> Light → Max aggression slider, tuned per project</li>
+        <li><span class="ic">✓</span> Optional Vision AI pass flags off-topic / unusable footage</li>
+      </ul>
+      <a href="/app" class="btn btn-primary">Try Auto Trim on your clip →</a>
+    </div>
+
+    <div data-reveal>
+      <div class="dual-timeline glass">
+        <div class="timeline-row raw">
+          <div class="timeline-row-head"><span class="label">Raw upload</span><span class="len">4:12</span></div>
+          <div class="mini-track">
+            <div class="mini-seg" style="width:18%"></div>
+            <div class="mini-seg cut" style="width:9%"></div>
+            <div class="mini-seg" style="width:22%"></div>
+            <div class="mini-seg cut" style="width:6%"></div>
+            <div class="mini-seg" style="width:15%"></div>
+            <div class="mini-seg cut" style="width:10%"></div>
+            <div class="mini-seg" style="width:20%"></div>
+          </div>
+        </div>
+        <div class="timeline-row after">
+          <div class="timeline-row-head"><span class="label">After Auto Trim</span><span class="len">2:47</span></div>
+          <div class="mini-track">
+            <div class="mini-seg kept" style="width:32%"></div>
+            <div class="mini-seg kept" style="width:39%"></div>
+            <div class="mini-seg kept" style="width:29%"></div>
+          </div>
+        </div>
+        <div class="worth-knowing">
+          <span>💡</span>
+          <span><strong>Worth knowing:</strong> Off-topic removal uses a Vision AI pass and needs an API key configured server-side. Silence and filler trimming work out of the box, on every plan.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== PRICING ============================== -->
+<section class="section section-alt" id="pricing">
+  <div class="section-inner">
+    <div class="section-head" data-reveal>
+      <span class="badge badge-accent badge-dot">Pricing</span>
+      <h2>Start free. Scale when it's working.</h2>
+      <p>No hidden render limits on captions. Pay for the workflow speed you need.</p>
+    </div>
+
+    <div class="pricing-toggle-wrap" data-reveal>
+      <div class="pricing-toggle segmented" data-billing-toggle>
+        <button class="seg active" data-value="monthly">Monthly</button>
+        <button class="seg" data-value="yearly">Yearly <span class="save-badge">Save 20%</span></button>
+      </div>
+    </div>
+
+    <div class="pricing-grid">
+      <div class="price-card glass" data-reveal>
+        <span class="plan-name">Week Pass</span>
+        <div class="plan-price"><span class="cur">₹</span>69<span class="per">/ 7 days</span></div>
+        <p class="plan-desc">One deadline, one project. Try the full pipeline before you commit.</p>
+        <ul class="plan-features">
+          <li><span class="ic">✓</span> Unlimited exports for 7 days</li>
+          <li><span class="ic">✓</span> All 82+ languages</li>
+          <li><span class="ic">✓</span> Auto Trim (Light &amp; Balanced)</li>
+          <li><span class="ic">✓</span> 720p export</li>
+        </ul>
+        <a href="/app" class="btn btn-outline btn-block">Get Week Pass</a>
+      </div>
+
+      <div class="price-card glass" data-reveal>
+        <span class="plan-name">Editor</span>
+        <div class="plan-price">
+          <span class="cur">₹</span><span class="price-monthly">299</span><span class="price-yearly">239</span><span class="per">/ month</span>
+        </div>
+        <p class="plan-desc">For a single creator posting every week.</p>
+        <ul class="plan-features">
+          <li><span class="ic">✓</span> Unlimited monthly exports</li>
+          <li><span class="ic">✓</span> All templates + Auto Trim (all aggression levels)</li>
+          <li><span class="ic">✓</span> 1080p export</li>
+          <li><span class="ic">✓</span> Priority ASR queue</li>
+        </ul>
+        <a href="/app" class="btn btn-outline btn-block">Choose Editor</a>
+      </div>
+
+      <div class="price-card glass featured" data-reveal>
+        <span class="ribbon">Most popular</span>
+        <span class="plan-name">Pro</span>
+        <div class="plan-price">
+          <span class="cur">₹</span><span class="price-monthly">469</span><span class="price-yearly">375</span><span class="per">/ month</span>
+        </div>
+        <p class="plan-desc">For teams shipping multi-language content daily.</p>
+        <ul class="plan-features">
+          <li><span class="ic">✓</span> Everything in Editor</li>
+          <li><span class="ic">✓</span> Off-topic Auto Trim (Vision AI)</li>
+          <li><span class="ic">✓</span> Code-switching &amp; Hinglish tuning</li>
+          <li><span class="ic">✓</span> 4K export + batch queue</li>
+        </ul>
+        <a href="/app" class="btn btn-primary btn-block">Choose Pro</a>
+      </div>
+
+      <div class="price-card glass" data-reveal>
+        <span class="plan-name">MAX</span>
+        <div class="plan-price">
+          <span class="cur">₹</span><span class="price-monthly">969</span><span class="price-yearly">775</span><span class="per">/ month</span>
+        </div>
+        <p class="plan-desc">Agencies and studios running client work at volume.</p>
+        <ul class="plan-features">
+          <li><span class="ic">✓</span> Everything in Pro</li>
+          <li><span class="ic">✓</span> Multi-seat workspace</li>
+          <li><span class="ic">✓</span> API &amp; plugin access</li>
+          <li><span class="ic">✓</span> Dedicated support channel</li>
+        </ul>
+        <a href="/app" class="btn btn-outline btn-block">Choose MAX</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== PLUGINS ============================== -->
+<section class="section" id="plugins">
+  <div class="section-inner">
+    <div class="section-head" data-reveal>
+      <span class="badge badge-accent badge-dot">Plugins &amp; integrations</span>
+      <h2>Fits the pipeline you already have.</h2>
+      <p>Bring Caption Engine into your editor, or wire it into your own automation.</p>
+    </div>
+
+    <div class="plugin-grid">
+      <div class="plugin-card glass" data-reveal>
+        <div class="plugin-ic">Pr</div>
+        <h3>Premiere Pro panel</h3>
+        <p>Send a sequence straight from Premiere, get captioned XML + burned-in MP4 back without leaving the timeline.</p>
+      </div>
+      <div class="plugin-card glass" data-reveal>
+        <div class="plugin-ic">Rs</div>
+        <h3>DaVinci Resolve bridge</h3>
+        <p>Round-trip subtitle tracks with word-level timing preserved for Fusion titles.</p>
+      </div>
+      <div class="plugin-card glass" data-reveal>
+        <div class="plugin-ic">⚡</div>
+        <h3>Zapier &amp; Make</h3>
+        <p>Trigger captioning the moment a file lands in Drive, Dropbox, or your CMS.</p>
+      </div>
+      <div class="plugin-card glass" data-reveal>
+        <div class="plugin-ic">{ }</div>
+        <h3>Public REST API</h3>
+        <p>The exact <code>/api/jobs</code> · <code>/api/progress</code> · <code>/api/download</code> endpoints powering this app, documented for you.</p>
+      </div>
+      <div class="plugin-card glass" data-reveal>
+        <div class="plugin-ic">▷</div>
+        <h3>CapCut import</h3>
+        <p>Export a CapCut-compatible caption track alongside your MP4.</p>
+      </div>
+      <div class="plugin-card glass" data-reveal>
+        <div class="plugin-ic">↻</div>
+        <h3>Webhook events</h3>
+        <p>Get notified the instant a render finishes — no polling required.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== CREATORS ============================== -->
+<section class="section section-alt" id="creators">
+  <div class="section-inner">
+    <div class="creators-banner" data-reveal>
+      <div>
+        <span class="badge badge-accent badge-dot">Creators programme <span class="tag-beta" style="margin-left:6px;">BETA</span></span>
+        <h2>Bring your audience. Earn on every subscriber.</h2>
+        <p>Share your referral link, and get paid recurring commission for every creator who subscribes through you. No cap, no waiting period.</p>
+        <div class="hero-ctas">
+          <a href="/app" class="btn btn-primary">Join the beta →</a>
+          <a href="#pricing" class="btn btn-outline">See plan payouts</a>
+        </div>
+        <div class="creators-stats" style="margin-top:28px;">
+          <div class="stat"><strong>30%</strong><span>Recurring commission</span></div>
+          <div class="stat"><strong>60 days</strong><span>Cookie window</span></div>
+          <div class="stat"><strong>₹0</strong><span>Minimum payout</span></div>
+        </div>
+      </div>
+      <div class="creators-visual">
+        <div class="payout-row"><span>Referral — Pro plan</span><strong>+₹140.70 / mo</strong></div>
+        <div class="payout-row"><span>Referral — Editor plan</span><strong>+₹89.70 / mo</strong></div>
+        <div class="payout-row"><span>Referral — MAX plan</span><strong>+₹290.70 / mo</strong></div>
+        <div class="payout-row"><span>This month's total</span><strong>+₹2,140.10</strong></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== FINAL CTA ============================== -->
+<section class="final-cta">
+  <div data-reveal>
+    <h2>Your next upload deserves better captions.</h2>
+    <p>Drop a file, pick a template, walk away with a finished export.</p>
+    <a href="/app" class="btn btn-primary btn-lg">Open Caption Engine →</a>
+  </div>
+</section>
+
+<!-- ============================== FOOTER ============================== -->
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-col">
+      <div class="footer-brand"><span class="nav-logo-mark" style="width:24px;height:24px;font-size:11px;">CE</span> Caption Engine</div>
+      <p style="padding-top:12px;max-width:280px;">Word-timed captions and Auto Trim for Indic and international video. Your media never leaves memory until you choose to export.</p>
+    </div>
+    <div class="footer-col">
+      <h4>Product</h4>
+      <a href="#languages">Languages</a>
+      <a href="#templates">Templates</a>
+      <a href="#auto-trim">Auto Trim</a>
+      <a href="#pricing">Pricing</a>
+    </div>
+    <div class="footer-col">
+      <h4>Developers</h4>
+      <a href="#plugins">Plugins</a>
+      <a href="/api/meta">API meta</a>
+      <a href="/app">Open editor</a>
+    </div>
+    <div class="footer-col">
+      <h4>Company</h4>
+      <a href="#creators">Creators programme</a>
+      <a href="#pricing">Pricing</a>
+      <a href="/app">Get started</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 Caption Engine. All renders happen on our servers — never your browser storage.</span>
+    <span>Built with FFmpeg · HarfBuzz · resvg</span>
+  </div>
+</footer>
+
+<script type="module" src="/js/landing.js"></script>
 </body>
 </html>

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Caption Engine — Editor</title>
+<meta name="description" content="Upload, auto trim and export word-timed captions." />
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/shared.css" />
+<link rel="stylesheet" href="/css/editor.css" />
+</head>
+<body class="editor">
+<div id="app-root">
+
+  <!-- ============================== HEADER ============================== -->
+  <header class="editor-header">
+    <a href="/" class="nav-brand" id="btn-home" title="Back to marketing site">
+      <span class="nav-logo-mark">CE</span>
+    </a>
+
+    <div class="project-title-wrap">
+      <input id="project-title" type="text" value="Untitled project" spellcheck="false" maxlength="120" />
+      <span class="title-save-hint" id="title-save-hint">Saved</span>
+    </div>
+
+    <div class="header-center">
+      <span class="badge" id="plan-badge">Free plan</span>
+      <div class="segmented aspect-select" id="aspect-select" role="radiogroup" aria-label="Aspect ratio">
+        <button class="seg active" data-value="portrait" type="button">9:16</button>
+        <button class="seg" data-value="landscape" type="button">16:9</button>
+        <button class="seg" data-value="square" type="button">1:1</button>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
+        <span class="knob">🌙</span>
+      </button>
+      <button class="btn btn-primary btn-sm" id="btn-export" type="button" disabled>Export</button>
+    </div>
+  </header>
+
+  <!-- ============================== MAIN ============================== -->
+  <div class="editor-main">
+
+    <!-- Left icon rail -->
+    <nav class="left-rail" aria-label="Editor panels">
+      <button class="rail-btn active" data-rail="media" type="button"><span class="ic">🎬</span>Media</button>
+      <button class="rail-btn" data-rail="text" type="button"><span class="ic">📝</span>Text</button>
+      <button class="rail-btn" data-rail="autotrim" type="button"><span class="ic">✂️</span>Auto Trim</button>
+    </nav>
+
+    <!-- Left side panel -->
+    <aside class="side-panel">
+      <form id="generate-form" novalidate>
+
+        <!-- Media -->
+        <div class="panel-tabbed active" data-panel="media">
+          <div class="side-panel-head"><h3>Media</h3><p>Upload once, configure your pipeline, then generate.</p></div>
+          <div class="side-panel-body">
+
+            <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Choose or drop a video">
+              <input id="file-input" type="file" accept="video/*,audio/*,.mp4,.mov,.mkv,.webm,.wav,.mp3,.m4a" hidden />
+              <div class="drop-ic">⬆️</div>
+              <strong>Drop video or audio</strong>
+              <span>In-memory only — never written to browser storage</span>
+            </div>
+
+            <div id="file-meta-card" class="file-meta-card" hidden>
+              <span class="file-ic">🎞️</span>
+              <div class="file-info"><strong id="file-name">—</strong><span id="file-size">—</span></div>
+              <button type="button" class="btn btn-ghost btn-icon" id="btn-clear-file" title="Remove file">✕</button>
+            </div>
+
+            <label class="field">
+              <span class="label">Language</span>
+              <select id="f-language" name="language"></select>
+            </label>
+
+            <div class="field">
+              <span class="label">Script</span>
+              <div class="segmented" id="script-pills">
+                <button type="button" class="seg active" data-value="native">Native</button>
+                <button type="button" class="seg" data-value="roman">Hinglish / Roman</button>
+              </div>
+            </div>
+
+            <label class="field">
+              <span class="label">ASR provider</span>
+              <select id="f-provider" name="provider"></select>
+              <p class="hint" id="provider-hint"></p>
+            </label>
+
+            <fieldset class="field" style="border:none;padding:0;margin:0;">
+              <span class="label">Outputs</span>
+              <div class="format-grid">
+                <label class="check-tile"><input type="checkbox" name="formats" value="mp4" checked /> MP4</label>
+                <label class="check-tile"><input type="checkbox" name="formats" value="srt" /> SRT</label>
+                <label class="check-tile"><input type="checkbox" name="formats" value="ass" /> ASS</label>
+                <label class="check-tile"><input type="checkbox" name="formats" value="json" /> JSON</label>
+              </div>
+            </fieldset>
+
+            <div class="switch-row">
+              <span class="switch-copy"><strong>Code-switching</strong><small>Keep English in Latin for Hinglish</small></span>
+              <label class="switch"><input type="checkbox" id="f-code-switching" /><span class="knob"></span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Text (cue list) -->
+        <div class="panel-tabbed" data-panel="text">
+          <div class="side-panel-head"><h3>Text</h3><p>Cues built from your transcript. Click any line to seek.</p></div>
+          <div class="side-panel-body">
+            <div id="cue-list" class="cue-list">
+              <div class="empty-state"><div class="es-ic">📝</div>Generate captions to see cues here.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto Trim -->
+        <div class="panel-tabbed" data-panel="autotrim">
+          <div class="side-panel-head"><h3>Auto Trim</h3><p>Runs as part of generation. Every cut stays reviewable.</p></div>
+          <div class="side-panel-body">
+            <div class="switch-row">
+              <span class="switch-copy"><strong>Enable Auto Trim</strong><small>Cut silence, fillers &amp; false starts</small></span>
+              <label class="switch"><input type="checkbox" id="f-autotrim" /><span class="knob"></span></label>
+            </div>
+
+            <div class="field">
+              <span class="label">Aggression</span>
+              <div class="aggression-grid" id="aggression-grid"></div>
+              <p class="hint" id="aggression-blurb"></p>
+            </div>
+
+            <div class="field" id="trim-toggles"></div>
+
+            <div id="trim-results" hidden>
+              <div class="trim-summary">
+                <div class="ts-stat"><strong id="ts-removed">0</strong><span>Cuts</span></div>
+                <div class="ts-stat"><strong id="ts-seconds">0s</strong><span>Removed</span></div>
+                <div class="ts-stat"><strong id="ts-restored">0</strong><span>Restored</span></div>
+              </div>
+              <p class="hint" style="margin-top:12px;">Removed clips</p>
+              <div id="removed-clip-list" class="removed-clip-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="side-panel-foot">
+          <button type="submit" class="btn btn-primary btn-block" id="btn-generate" disabled>Generate captions</button>
+          <p class="hint" id="generate-hint" style="margin-top:8px;">Choose a file to get started.</p>
+        </div>
+      </form>
+    </aside>
+
+    <!-- Center stage -->
+    <main class="center-stage" id="center-stage" data-mode="original">
+      <div class="mode-pills" id="mode-pills">
+        <button class="mode-pill active" data-mode="original" type="button">Original</button>
+        <button class="mode-pill" data-mode="auto-trimmed" type="button">Auto-trimmed</button>
+        <button class="mode-pill" data-mode="behind-subject" type="button">Behind subject</button>
+        <button class="mode-pill" data-mode="text-tracking" type="button">Text tracking</button>
+        <button class="mode-pill" data-mode="camera-tracking" type="button">Camera tracking</button>
+      </div>
+
+      <div class="preview-viewport">
+        <div class="phone-frame" id="phone-frame" data-aspect="portrait">
+          <video id="preview-video" playsinline muted></video>
+
+          <div class="upload-empty-video" id="upload-empty-video">
+            <div class="ic">🎬</div>
+            <strong>No video yet</strong>
+            <span>Drop a file in the Media panel to preview it here</span>
+          </div>
+
+          <div class="safe-zone-overlay" id="safe-zone-overlay">
+            <div class="sz-box"><span class="sz-label">Safe zone</span></div>
+          </div>
+
+          <div class="caption-overlay" id="caption-overlay">
+            <span class="cap-text" id="caption-text"></span>
+          </div>
+
+          <div class="progress-overlay" id="progress-overlay" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <div class="po-track"><div class="po-fill" id="po-fill"></div></div>
+            <p class="po-msg" id="po-msg">Starting…</p>
+            <div class="po-log" id="po-log"></div>
+            <p class="po-error" id="po-error" hidden></p>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-retry" hidden>Start a new project</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button class="btn btn-icon btn-ghost" id="btn-play" type="button" aria-label="Play / pause">▶</button>
+        <span class="transport-time" id="transport-time">0:00 / 0:00</span>
+        <div class="transport-scrub" id="transport-scrub">
+          <div class="fill" id="scrub-fill"></div>
+          <div class="knob" id="scrub-knob"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="btn-safe-zone" type="button">Safe zone</button>
+      </div>
+    </main>
+
+    <!-- Right inspector -->
+    <aside class="inspector">
+      <div class="inspector-tabs tabs">
+        <button class="tab active" data-inspector-tab="templates" type="button">Templates</button>
+        <button class="tab" data-inspector-tab="text" type="button">Text</button>
+      </div>
+      <div class="inspector-body">
+
+        <div class="inspector-tabpanel active" data-inspector-panel="templates">
+          <div class="template-mini-grid" id="template-grid"></div>
+          <p class="readonly-note" id="template-note">Pick a look before you generate — the template locks in once rendering starts.</p>
+        </div>
+
+        <div class="inspector-tabpanel" data-inspector-panel="text">
+          <label class="field">
+            <span class="label">Font</span>
+            <select id="cap-font-select">
+              <option value="'Space Grotesk', sans-serif">Space Grotesk</option>
+              <option value="'Inter', sans-serif">Inter</option>
+              <option value="Georgia, 'Times New Roman', serif">Editorial Serif</option>
+              <option value="'JetBrains Mono', monospace">Mono</option>
+            </select>
+          </label>
+
+          <div class="range-field">
+            <span class="label">Size <span class="range-value" id="cap-size-value">20px</span></span>
+            <input type="range" id="cap-size-range" min="12" max="36" value="20" />
+          </div>
+
+          <div class="color-row">
+            <label class="field" style="flex:1;">
+              <span class="label">Text</span>
+              <input type="color" id="cap-color" class="color-swatch-input" value="#ffffff" />
+            </label>
+            <label class="field" style="flex:1;">
+              <span class="label">Active word</span>
+              <input type="color" id="cap-active-color" class="color-swatch-input" value="#2dd4bf" />
+            </label>
+          </div>
+
+          <div class="effect-toggle-list">
+            <div class="switch-row">
+              <span class="switch-copy"><strong>Uppercase</strong></span>
+              <label class="switch"><input type="checkbox" id="fx-uppercase" /><span class="knob"></span></label>
+            </div>
+            <div class="switch-row">
+              <span class="switch-copy"><strong>Glow</strong></span>
+              <label class="switch"><input type="checkbox" id="fx-glow" /><span class="knob"></span></label>
+            </div>
+            <div class="switch-row">
+              <span class="switch-copy"><strong>Boxed active word</strong></span>
+              <label class="switch"><input type="checkbox" id="fx-boxed" /><span class="knob"></span></label>
+            </div>
+          </div>
+
+          <p class="readonly-note">This previews the caption overlay live in the player. The baked-in render style comes from the Template you pick before generating.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ============================== BOTTOM TIMELINE ============================== -->
+  <section class="editor-timeline">
+    <div class="timeline-toolbar">
+      <span class="tl-title">Timeline</span>
+      <div class="tl-actions">
+        <span class="hint" id="timeline-duration-label">0:00 total</span>
+      </div>
+    </div>
+    <div class="timeline-scroll" id="timeline-scroll">
+      <div class="timeline-inner" id="timeline-inner">
+        <div class="timeline-ruler" id="timeline-ruler"></div>
+        <div class="timeline-tracks">
+          <div class="tl-track"><div class="tl-track-label">V1</div><div class="tl-track-body" id="track-v1"></div></div>
+          <div class="tl-track"><div class="tl-track-label">T1</div><div class="tl-track-body" id="track-t1"></div></div>
+          <div class="tl-track"><div class="tl-track-label">A1</div><div class="tl-track-body" id="track-a1"></div></div>
+        </div>
+        <div class="tl-playhead" id="tl-playhead" style="left:40px;"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Export panel -->
+<div class="export-backdrop" id="export-backdrop">
+  <div class="export-panel glass">
+    <h3>Export your captions</h3>
+    <div class="export-chip-grid" id="export-chip-grid"></div>
+    <button type="button" class="btn btn-ghost btn-block" id="btn-export-close">Close</button>
+  </div>
+</div>
+
+<script type="module" src="/js/editor.js"></script>
+</body>
+</html>
