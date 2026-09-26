@@ -19,7 +19,13 @@ import {
 } from './api.js';
 import { takePendingMedia } from './pending-media.js';
 import { upsertProject, getProject } from './projects-store.js';
-import { mountUserChrome, userMenuButtonHtml } from './user-session.js';
+import { mountUserChrome, userMenuButtonHtml, openAccountModal } from './user-session.js';
+import {
+  hasPrimaryApiKey,
+  loadApiKeys,
+  saveApiKeys,
+  appendApiKeysToFormData,
+} from './api-keys.js';
 
 // ---------------------------------------------------------------------------
 // Module state (in memory only — never persisted)
@@ -50,6 +56,16 @@ const state = {
   pxPerSecond: 42,
   activeCueIndex: -1,
   locked: false, // true once a job has been created — generation inputs freeze
+  captionsEnabled: true,
+  maxWordsPerCue: 4,
+  intelligentCaptions: true,
+  captionDelayMs: 0,
+  delayScope: 'all',
+  selectWordsMode: false,
+  selectedCueIndexes: new Set(),
+  /** Snapshot of words at first transcript load — used by Reset to original. */
+  originalWords: null,
+  pendingGenerateDemo: false,
 };
 
 const el = (id) => document.getElementById(id);
@@ -402,9 +418,43 @@ function lockGenerateInputs() {
   qsa('.seg', el('aspect-select')).forEach((b) => (b.disabled = true));
 }
 
-async function submitGenerate(e) {
-  e.preventDefault();
+function openApiKeyModal() {
+  const modal = el('apikey-modal');
+  if (!modal) return;
+  const keys = loadApiKeys();
+  const s = el('modal-key-sarvam');
+  const e11 = el('modal-key-eleven');
+  if (s && !s.value) s.placeholder = keys.sarvamApiKey ? '•••• saved' : 'SARVAM_API_KEY';
+  if (e11 && !e11.value) e11.placeholder = keys.elevenlabsApiKey ? '•••• saved' : 'ELEVENLABS_API_KEY';
+  modal.hidden = false;
+  document.body.classList.add('modal-open');
+}
+
+function closeApiKeyModal() {
+  const modal = el('apikey-modal');
+  if (!modal) return;
+  modal.hidden = true;
+  if (!document.getElementById('account-modal') || document.getElementById('account-modal').hidden) {
+    document.body.classList.remove('modal-open');
+  }
+}
+
+function isMissingKeyError(err) {
+  if (!err) return false;
+  if (err.body?.code === 'missing_api_key' || err.code === 'missing_api_key') return true;
+  const msg = String(err.message || err || '');
+  return /api key/i.test(msg) && /sarvam|elevenlabs|transcribe/i.test(msg);
+}
+
+async function submitGenerate(e, { forceDemo = false } = {}) {
+  e?.preventDefault?.();
   if (!state.mediaFile) { toast('Choose a video or audio file first.', 'error'); return; }
+
+  const useDemo = forceDemo || state.pendingGenerateDemo;
+  if (!useDemo && !hasPrimaryApiKey()) {
+    openApiKeyModal();
+    return;
+  }
 
   const formData = new FormData();
   formData.append('video', state.mediaFile);
@@ -421,12 +471,17 @@ async function submitGenerate(e) {
   formData.append('removeFillers', String(state.trimToggles.removeFillers));
   formData.append('removeRepetitions', String(state.trimToggles.removeRepetitions));
   formData.append('removeOffTopic', String(state.trimToggles.removeOffTopic));
+  formData.append('maxWordsPerCue', String(state.maxWordsPerCue));
+  if (useDemo) formData.append('demoMode', 'true');
+  else appendApiKeysToFormData(formData);
 
+  state.pendingGenerateDemo = false;
+  closeApiKeyModal();
   lockGenerateInputs();
   el('btn-generate').disabled = true;
   el('btn-generate').textContent = 'Uploading…';
   showProgressOverlay();
-  setProgress(0, 'Uploading your file…');
+  setProgress(0, useDemo ? 'Starting demo sample…' : 'Uploading your file…');
 
   try {
     const { jobId } = await createJob(formData, {
@@ -449,8 +504,29 @@ async function submitGenerate(e) {
 
     subscribeProgress(jobId);
   } catch (err) {
-    showProgressError(err.message || 'Upload failed.');
+    if (isMissingKeyError(err)) {
+      hideProgressOverlay();
+      unlockGenerateSoft();
+      openApiKeyModal();
+      toast(err.message || 'API key required.', 'error');
+      return;
+    }
+    showProgressError(err.message || 'Upload failed.', err.hint);
   }
+}
+
+function unlockGenerateSoft() {
+  state.locked = false;
+  qsa('#generate-form input, #generate-form select, #generate-form button[type="button"]').forEach((i) => {
+    i.disabled = false;
+  });
+  el('dropzone')?.removeAttribute('aria-disabled');
+  qsa('.seg', el('aspect-select')).forEach((b) => { b.disabled = false; });
+  el('btn-generate').disabled = !state.mediaFile;
+  el('btn-generate').textContent = 'Generate captions';
+  el('generate-hint').textContent = state.mediaFile
+    ? 'Ready — review options, then generate.'
+    : 'Choose a file to get started.';
 }
 
 // ---------------------------------------------------------------------------
@@ -483,7 +559,15 @@ function appendLog(message) {
   log.scrollTop = log.scrollHeight;
 }
 
-function showProgressError(message, hint) {
+function showProgressError(message, hint, code) {
+  const missingKey = code === 'missing_api_key' || isMissingKeyError({ message, code });
+  if (missingKey) {
+    hideProgressOverlay();
+    unlockGenerateSoft();
+    openApiKeyModal();
+    toast(message || 'API key required to transcribe audio.', 'error');
+    return;
+  }
   showProgressOverlay();
   qs('.spinner', el('progress-overlay')).style.display = 'none';
   qs('.po-track', el('progress-overlay')).style.display = 'none';
@@ -529,7 +613,7 @@ async function handleProgressEvent(jobId, evt) {
       await onJobDone(jobId);
       break;
     case 'error':
-      showProgressError(evt.message, evt.hint);
+      showProgressError(evt.message, evt.hint, evt.code);
       break;
     default:
       break;
@@ -622,20 +706,39 @@ function ensureVideoSource(jobId) {
 // Transcript → cues, cuts → removed clips + V1 timeline
 // ---------------------------------------------------------------------------
 
+function wordLabel(w) {
+  return state.script === 'roman' && w.roman ? w.roman : w.text;
+}
+
+function cueDelaySec(cue) {
+  if (cue && Number.isFinite(cue.delayMs)) return cue.delayMs / 1000;
+  return (state.captionDelayMs || 0) / 1000;
+}
+
+function cueTimeWithDelay(sec, cue) {
+  return Math.max(0, Number(sec) + cueDelaySec(cue));
+}
+
 function buildCues(words) {
-  const MAX_WORDS = 5;
-  const GAP = 0.45;
-  const spoken = (words ?? []).filter((w) => w.type === 'word');
+  const MAX_WORDS = Math.max(1, Math.min(12, state.maxWordsPerCue || 4));
+  const GAP = state.intelligentCaptions ? 0.45 : 0.85;
+  const SENTENCE_END = /[.!?।॥]$/;
+  const spoken = (words ?? []).filter((w) => w.type === 'word' && w.keep !== false);
   const groups = [];
   let current = null;
-  for (const w of spoken) {
-    const prevEnd = current?.words[current.words.length - 1]?.end;
-    if (current && (w.start - prevEnd >= GAP || current.words.length >= MAX_WORDS)) {
+  for (let i = 0; i < spoken.length; i++) {
+    const w = spoken[i];
+    if (!current) current = { words: [] };
+    current.words.push(w);
+    const next = spoken[i + 1];
+    if (!next) continue;
+    const gap = next.start - w.end;
+    const atLimit = current.words.length >= MAX_WORDS;
+    const sentenceBreak = state.intelligentCaptions && SENTENCE_END.test(String(w.text || '').trim());
+    if (gap >= GAP || atLimit || sentenceBreak) {
       groups.push(current);
       current = null;
     }
-    if (!current) current = { words: [] };
-    current.words.push(w);
   }
   if (current) groups.push(current);
 
@@ -644,13 +747,42 @@ function buildCues(words) {
     start: g.words[0].start,
     end: g.words[g.words.length - 1].end,
     words: g.words,
-    text: g.words.map((w) => (state.script === 'roman' && w.roman ? w.roman : w.text)).join(' '),
+    text: g.words.map(wordLabel).join(' '),
   }));
+}
+
+function updateTextMeta() {
+  const meta = el('text-meta');
+  if (!meta) return;
+  if (!state.cues.length) {
+    meta.textContent = 'No captions yet';
+    return;
+  }
+  const lang = state.transcript?.language || state.transcript?.detectedLanguageRaw || 'auto';
+  const script = state.script === 'roman' ? 'roman' : 'native';
+  meta.textContent = `${state.cues.length} lines · ${lang} · ${script}`;
+}
+
+function regenerateCuesFromWords() {
+  if (!state.transcript?.words?.length && !state.originalWords?.length) {
+    toast('Generate captions first.', 'error');
+    return;
+  }
+  const words = state.transcript?.words || state.originalWords;
+  state.cues = buildCues(words);
+  state.selectedCueIndexes.clear();
+  renderCueList();
+  buildTimeline();
+  updateTextMeta();
+  updateCaptionOverlay(el('preview-video')?.currentTime || 0);
 }
 
 async function loadTranscriptAndCuts(jobId) {
   try {
     state.transcript = await getTranscript(jobId);
+    if (!state.originalWords) {
+      state.originalWords = structuredClone(state.transcript.words);
+    }
     state.cues = buildCues(state.transcript.words);
     state.duration = state.transcript.duration || state.duration;
   } catch {
@@ -668,24 +800,67 @@ async function loadTranscriptAndCuts(jobId) {
   renderCueList();
   renderRemovedClips();
   buildTimeline();
+  updateTextMeta();
+  if (el('btn-generate-layer')) el('btn-generate-layer').disabled = false;
+}
+
+function seekToCue(cue) {
+  const video = el('preview-video');
+  if (!video || !cue) return;
+  video.currentTime = cueTimeWithDelay(cue.start, cue);
+  if (video.paused) video.play().catch(() => {});
+  state.activeCueIndex = -1;
+  updateCaptionOverlay(video.currentTime);
+  updatePlayhead(video.currentTime);
 }
 
 function renderCueList() {
   const list = el('cue-list');
+  if (!list) return;
   list.innerHTML = '';
+  list.classList.toggle('select-mode', state.selectWordsMode);
+  updateTextMeta();
   if (!state.cues.length) {
     list.innerHTML = '<div class="empty-state"><div class="es-ic">📝</div>No cues yet.</div>';
     return;
   }
   for (const cue of state.cues) {
     const row = document.createElement('div');
-    row.className = 'cue-item';
+    const selected = state.selectedCueIndexes.has(cue.index);
+    row.className = `cue-item${selected ? ' selected' : ''}`;
     row.setAttribute('data-cue-index', String(cue.index));
-    row.innerHTML = `<span class="cue-time">${formatTime(cue.start)}</span><span class="cue-text">${escapeHtml(cue.text)}</span>`;
-    row.addEventListener('click', () => {
-      const video = el('preview-video');
-      video.currentTime = cue.start;
-      if (video.paused) video.play().catch(() => {});
+    row.innerHTML = `
+      <div class="cue-card-head">
+        <span class="cue-num">${cue.index + 1}</span>
+        <span class="cue-time">${formatTime(cueTimeWithDelay(cue.start, cue))} → ${formatTime(cueTimeWithDelay(cue.end, cue))}</span>
+      </div>
+      <div class="cue-text" contenteditable="true" spellcheck="false" role="textbox">${escapeHtml(cue.text)}</div>
+    `;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.cue-text')) return;
+      if (state.selectWordsMode) {
+        if (state.selectedCueIndexes.has(cue.index)) state.selectedCueIndexes.delete(cue.index);
+        else state.selectedCueIndexes.add(cue.index);
+        row.classList.toggle('selected', state.selectedCueIndexes.has(cue.index));
+        return;
+      }
+      seekToCue(cue);
+    });
+    const textEl = qs('.cue-text', row);
+    textEl.addEventListener('blur', () => {
+      const next = textEl.textContent?.trim() || '';
+      if (next === cue.text) return;
+      cue.text = next;
+      // Keep word timings; treat edit as display override.
+      if (cue.words?.length === 1) cue.words[0].text = next;
+      buildTimeline();
+      updateCaptionOverlay(el('preview-video')?.currentTime || 0);
+    });
+    textEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        textEl.blur();
+      }
     });
     list.appendChild(row);
   }
@@ -805,7 +980,10 @@ function buildTimeline() {
     clip.textContent = cue.text;
     clip.title = cue.text;
     clip.setAttribute('data-cue-index', String(cue.index));
-    clip.addEventListener('click', () => { el('preview-video').currentTime = cue.start; });
+    clip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      seekToCue(cue);
+    });
     t1.appendChild(clip);
   }
 
@@ -827,15 +1005,18 @@ function buildTimeline() {
   }
   a1.appendChild(wf);
 
-  // Seeking by clicking the ruler/tracks
-  const inner2 = inner;
-  inner2.onclick = (e) => {
+  // Seeking by clicking the ruler / V1 / A1 / empty track space
+  const seekFromEvent = (e) => {
     if (e.target.closest('.t-clip')) return;
-    const rect = inner2.getBoundingClientRect();
-    const x = e.clientX - rect.left - 40;
-    const t = Math.max(0, x / px);
-    el('preview-video').currentTime = t;
+    const innerRect = inner.getBoundingClientRect();
+    const relX = e.clientX - innerRect.left - 40;
+    const t = Math.max(0, Math.min(duration, relX / px));
+    const video = el('preview-video');
+    video.currentTime = t;
+    updatePlayhead(t);
+    updateCaptionOverlay(t);
   };
+  inner.onclick = seekFromEvent;
 }
 
 function updatePlayhead(t) {
@@ -854,10 +1035,20 @@ function updatePlayhead(t) {
 // ---------------------------------------------------------------------------
 
 function findActiveCue(t) {
-  return state.cues.findIndex((c) => t >= c.start && t < c.end);
+  return state.cues.findIndex((c) => {
+    const d = cueDelaySec(c);
+    return t >= c.start + d && t < c.end + d;
+  });
 }
 
 function updateCaptionOverlay(t) {
+  const overlay = el('caption-overlay');
+  if (overlay) overlay.hidden = !state.captionsEnabled;
+  if (!state.captionsEnabled) {
+    el('caption-text').innerHTML = '';
+    return;
+  }
+
   const idx = findActiveCue(t);
   if (idx === state.activeCueIndex) {
     if (idx >= 0) highlightActiveWord(t, state.cues[idx]);
@@ -874,7 +1065,7 @@ function updateCaptionOverlay(t) {
   }
   const cueRow = qs(`.cue-item[data-cue-index="${idx}"]`, el('cue-list'));
   cueRow?.classList.add('active');
-  cueRow?.scrollIntoView({ block: 'nearest' });
+  cueRow?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   const tClip = qs(`.t-clip[data-cue-index="${idx}"]`, el('track-t1'));
   tClip?.classList.add('active');
 
@@ -882,10 +1073,17 @@ function updateCaptionOverlay(t) {
 }
 
 function highlightActiveWord(t, cue) {
+  const delay = cueDelaySec(cue);
+  // Prefer edited cue text when it no longer matches word join.
+  const joined = (cue.words || []).map(wordLabel).join(' ');
+  if (cue.text && cue.text !== joined) {
+    el('caption-text').textContent = cue.text;
+    return;
+  }
   const html = cue.words
     .map((w) => {
-      const label = escapeHtml(state.script === 'roman' && w.roman ? w.roman : w.text);
-      const active = t >= w.start && t < w.end;
+      const label = escapeHtml(wordLabel(w));
+      const active = t >= (w.start + delay) && t < (w.end + delay);
       return active ? `<span class="word-active">${label}</span>` : label;
     })
     .join(' ');
@@ -1169,6 +1367,131 @@ function initHomeButton() {
   });
 }
 
+function syncMaxWordsUi() {
+  const label = el('max-words-value');
+  if (label) label.textContent = String(state.maxWordsPerCue);
+}
+
+function initTextPanel() {
+  el('f-captions-enabled')?.addEventListener('change', (e) => {
+    state.captionsEnabled = e.target.checked;
+    updateCaptionOverlay(el('preview-video')?.currentTime || 0);
+  });
+
+  el('max-words-dec')?.addEventListener('click', () => {
+    state.maxWordsPerCue = Math.max(1, state.maxWordsPerCue - 1);
+    syncMaxWordsUi();
+    if (state.transcript?.words?.length) regenerateCuesFromWords();
+  });
+  el('max-words-inc')?.addEventListener('click', () => {
+    state.maxWordsPerCue = Math.min(12, state.maxWordsPerCue + 1);
+    syncMaxWordsUi();
+    if (state.transcript?.words?.length) regenerateCuesFromWords();
+  });
+  syncMaxWordsUi();
+
+  el('f-intelligent')?.addEventListener('change', (e) => {
+    state.intelligentCaptions = e.target.checked;
+    if (state.transcript?.words?.length) regenerateCuesFromWords();
+  });
+  el('intelligent-tip')?.addEventListener('click', () => {
+    toast('Uses audio prosody and natural semantic clauses for natural sentence breaks.', 'info');
+  });
+
+  wireSegmented(el('delay-scope'), (value) => {
+    state.delayScope = value;
+  });
+
+  const delay = el('caption-delay');
+  const delayLabel = el('caption-delay-value');
+  delay?.addEventListener('input', () => {
+    const ms = Number(delay.value) || 0;
+    if (delayLabel) delayLabel.textContent = `${ms} ms`;
+    if (state.delayScope === 'selected' && state.selectedCueIndexes.size) {
+      for (const idx of state.selectedCueIndexes) {
+        const cue = state.cues[idx];
+        if (cue) cue.delayMs = ms;
+      }
+      renderCueList();
+      buildTimeline();
+      updateCaptionOverlay(el('preview-video')?.currentTime || 0);
+      return;
+    }
+    state.captionDelayMs = ms;
+    renderCueList();
+    updateCaptionOverlay(el('preview-video')?.currentTime || 0);
+  });
+
+  el('btn-reset-cues')?.addEventListener('click', () => {
+    if (!state.originalWords?.length) {
+      toast('Nothing to reset yet.', 'error');
+      return;
+    }
+    if (state.transcript) state.transcript.words = structuredClone(state.originalWords);
+    state.captionDelayMs = 0;
+    if (delay) delay.value = '0';
+    if (delayLabel) delayLabel.textContent = '0 ms';
+    regenerateCuesFromWords();
+    toast('Restored original transcription.', 'success');
+  });
+
+  el('btn-regenerate-cues')?.addEventListener('click', () => {
+    regenerateCuesFromWords();
+    toast('Captions regenerated with current settings.', 'success');
+  });
+
+  el('btn-select-words')?.addEventListener('click', () => {
+    state.selectWordsMode = !state.selectWordsMode;
+    el('btn-select-words')?.classList.toggle('active', state.selectWordsMode);
+    if (!state.selectWordsMode) state.selectedCueIndexes.clear();
+    renderCueList();
+  });
+
+  el('btn-generate-layer')?.addEventListener('click', () => {
+    if (state.cues.length) {
+      toast('Layer captions are ready — use Export when you are done editing.', 'info');
+      return;
+    }
+    el('btn-generate')?.click();
+  });
+}
+
+function initApiKeyUi() {
+  el('btn-api-keys')?.addEventListener('click', () => openAccountModal('keys'));
+
+  el('apikey-modal')?.addEventListener('click', (e) => {
+    const t = /** @type {HTMLElement} */ (e.target);
+    if (t.hasAttribute('data-close-apikey') || t.closest('[data-close-apikey]')) {
+      closeApiKeyModal();
+    }
+  });
+
+  el('btn-save-continue-generate')?.addEventListener('click', () => {
+    const sarvam = el('modal-key-sarvam')?.value?.trim();
+    const eleven = el('modal-key-eleven')?.value?.trim();
+    if (!sarvam && !eleven && !hasPrimaryApiKey()) {
+      toast('Enter a Sarvam or ElevenLabs key first.', 'error');
+      return;
+    }
+    const patch = {};
+    if (sarvam) patch.sarvamApiKey = sarvam;
+    if (eleven) patch.elevenlabsApiKey = eleven;
+    if (Object.keys(patch).length) saveApiKeys(patch);
+    closeApiKeyModal();
+    submitGenerate(null, { forceDemo: false });
+  });
+
+  el('btn-demo-mode')?.addEventListener('click', () => {
+    state.pendingGenerateDemo = true;
+    closeApiKeyModal();
+    submitGenerate(null, { forceDemo: true });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeApiKeyModal();
+  });
+}
+
 function ensureEditorUserMenu() {
   const slot = el('editor-user-slot');
   if (slot && !slot.dataset.ready) {
@@ -1206,6 +1529,8 @@ export async function initEditor(opts = {}) {
   initExportPanel();
   initRetryButton();
   initHomeButton();
+  initTextPanel();
+  initApiKeyUi();
 
   el('generate-form')?.addEventListener('submit', submitGenerate);
 

@@ -15,9 +15,24 @@ import {
   publicAutoTrimMeta,
 } from './autotrim-presets.js';
 import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { DEMO_TRANSCRIPT } from './demo-transcript.js';
 
 const ASPECTS: AspectPreset[] = ['portrait', 'landscape', 'square', 'original'];
 const FORMATS: Array<'mp4' | 'srt' | 'ass' | 'json'> = ['mp4', 'srt', 'ass', 'json'];
+
+function parseOptionalKey(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const v = raw.trim();
+  return v.length >= 8 ? v : undefined;
+}
+
+/** Materialise the bundled demo transcript into the job work dir. */
+export function writeDemoTranscript(workDir: string): string {
+  const path = join(workDir, 'demo-transcript.json');
+  writeFileSync(path, JSON.stringify(DEMO_TRANSCRIPT, null, 2), 'utf8');
+  return path;
+}
 
 /** FluxoCut-style template gallery → engine style preset (+ motion hint). */
 export const TEMPLATE_GALLERY = [
@@ -198,6 +213,7 @@ export function uiOptionsToCli(
   const provider = parseProvider(body.provider);
   const trimControls = parseAutoTrimControls(body);
   const trimCli = autoTrimToCliFragment(trimControls);
+  const demoMode = parseBool(body.demoMode ?? body.demo_mode);
 
   const outputDir = join(outputPath, '..');
   const cutsOut = join(outputDir, 'cuts.json');
@@ -207,6 +223,16 @@ export function uiOptionsToCli(
   const maxWordsPerCue = maxWordsRaw !== undefined && maxWordsRaw !== ''
     ? Number(maxWordsRaw)
     : undefined;
+
+  const sarvamApiKey = parseOptionalKey(
+    body.sarvamApiKey ?? body.SARVAM_API_KEY ?? body.sarvam_api_key,
+  );
+  const elevenlabsApiKey = parseOptionalKey(
+    body.elevenlabsApiKey ?? body.ELEVENLABS_API_KEY ?? body.elevenlabs_api_key,
+  );
+  const deepgramApiKey = parseOptionalKey(
+    body.deepgramApiKey ?? body.DEEPGRAM_API_KEY ?? body.deepgram_api_key,
+  );
 
   const opts = baseCliOptions({
     input: inputPath,
@@ -232,6 +258,16 @@ export function uiOptionsToCli(
     transcriptOut,
     ...(maxWordsPerCue !== undefined && Number.isFinite(maxWordsPerCue)
       ? { maxWordsPerCue: Math.max(1, Math.min(20, maxWordsPerCue)) }
+      : {}),
+    ...(sarvamApiKey ? { sarvamApiKey } : {}),
+    ...(elevenlabsApiKey ? { elevenlabsApiKey } : {}),
+    ...(deepgramApiKey ? { deepgramApiKey } : {}),
+    ...(demoMode
+      ? {
+          demoMode: true,
+          transcriptIn: writeDemoTranscript(workDir),
+          allowStale: true,
+        }
       : {}),
     yes: true,
     verbose: true,

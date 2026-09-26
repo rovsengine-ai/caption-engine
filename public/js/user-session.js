@@ -3,6 +3,8 @@
  * No auth backend — demo identity for the Spaces UI.
  */
 
+import { loadApiKeys, saveApiKeys, clearApiKeys, maskKey } from './api-keys.js';
+
 export const DEMO_USER = {
   name: 'Vaibhav',
   email: 'vaibhav82711@gmail.com',
@@ -52,6 +54,7 @@ const ICONS = {
   payments: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/></svg>',
   support: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2h-1v-6h3M4 13h3v6H6a2 2 0 0 1-2-2v-4z"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.2 1-1.2 2"/><circle cx="12" cy="17" r=".8" fill="currentColor"/></svg>',
+  keys: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 7a4 4 0 1 1-4 4"/><path d="M11 11l-8 8 2 2 2-1 1 1 2-2-1-1 1-2z"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 14l6-6 6 6"/></svg>',
   diamond: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.5 7H22l-5.5 4.5L18.5 22 12 17.5 5.5 22l2-8.5L2 9h6.5L12 2z"/></svg>',
 };
@@ -80,6 +83,7 @@ function ensureDom() {
         </div>
       </div>
       <button type="button" class="flyout-item" data-action="account" role="menuitem">${ICONS.account}<span>Account</span></button>
+      <button type="button" class="flyout-item" data-action="keys" role="menuitem">${ICONS.keys}<span>API Keys</span></button>
       <button type="button" class="flyout-item" data-action="projects" role="menuitem">${ICONS.projects}<span>Projects</span></button>
       <button type="button" class="flyout-item" data-action="billing" role="menuitem">${ICONS.billing}<span>Plan &amp; billing</span></button>
       <div class="flyout-sep"></div>
@@ -120,6 +124,7 @@ function renderNav() {
   if (!nav) return;
   const items = [
     { id: 'manage', label: 'Manage plan', icon: ICONS.plan },
+    { id: 'keys', label: 'API Keys', icon: ICONS.keys },
     { id: 'usage', label: 'Usage', icon: ICONS.usage },
     { id: 'devices', label: 'Devices / Sessions', icon: ICONS.devices },
     { id: 'payments', label: 'Payments', icon: ICONS.payments },
@@ -183,6 +188,53 @@ function renderContent() {
     $('#btn-upgrade')?.addEventListener('click', () => {
       const plan = PLANS.find((p) => p.id === selectedPlanId);
       window.alert(`${plan?.name || 'Plan'} checkout is a demo on this Spaces build — wire Stripe/Razorpay when you go live.`);
+    });
+    return;
+  }
+
+  if (activeTab === 'keys') {
+    const keys = loadApiKeys();
+    root.innerHTML = `
+      <h3 class="account-section-title">API Keys</h3>
+      <p class="account-copy">Keys stay in this browser’s localStorage only — never with your video files. Paste Sarvam and/or ElevenLabs to generate word-timed captions.</p>
+      <label class="field key-field">
+        <span class="label">Sarvam AI API Key <small>SARVAM_API_KEY</small></span>
+        <input type="password" id="acc-key-sarvam" autocomplete="off" spellcheck="false" placeholder="${keys.sarvamApiKey ? maskKey(keys.sarvamApiKey) : 'sk_…'}" value="" />
+      </label>
+      <label class="field key-field">
+        <span class="label">ElevenLabs API Key <small>ELEVENLABS_API_KEY</small></span>
+        <input type="password" id="acc-key-eleven" autocomplete="off" spellcheck="false" placeholder="${keys.elevenlabsApiKey ? maskKey(keys.elevenlabsApiKey) : 'sk_…'}" value="" />
+      </label>
+      <label class="field key-field">
+        <span class="label">Deepgram API Key <small>optional</small></span>
+        <input type="password" id="acc-key-deepgram" autocomplete="off" spellcheck="false" placeholder="${keys.deepgramApiKey ? maskKey(keys.deepgramApiKey) : 'optional'}" value="" />
+      </label>
+      <div class="key-actions">
+        <button type="button" class="btn btn-primary" id="acc-keys-save">Save keys</button>
+        <button type="button" class="btn btn-ghost" id="acc-keys-clear">Clear saved keys</button>
+      </div>
+      <p class="account-footnote">Leave a field blank to keep the currently saved value. Clearing removes all keys from this browser.</p>
+    `;
+    $('#acc-keys-save')?.addEventListener('click', () => {
+      const sarvam = /** @type {HTMLInputElement} */ ($('#acc-key-sarvam'))?.value?.trim();
+      const eleven = /** @type {HTMLInputElement} */ ($('#acc-key-eleven'))?.value?.trim();
+      const deepgram = /** @type {HTMLInputElement} */ ($('#acc-key-deepgram'))?.value?.trim();
+      const patch = {};
+      if (sarvam) patch.sarvamApiKey = sarvam;
+      if (eleven) patch.elevenlabsApiKey = eleven;
+      if (deepgram) patch.deepgramApiKey = deepgram;
+      if (!Object.keys(patch).length) {
+        window.alert('Enter at least one new key to save, or use Clear.');
+        return;
+      }
+      saveApiKeys(patch);
+      renderContent();
+      window.alert('API keys saved in this browser.');
+    });
+    $('#acc-keys-clear')?.addEventListener('click', () => {
+      if (!window.confirm('Clear all saved ASR API keys from this browser?')) return;
+      clearApiKeys();
+      renderContent();
     });
     return;
   }
@@ -299,6 +351,7 @@ export function closeAccountModal() {
 function handleAction(action) {
   closeFlyout();
   if (action === 'account') openAccountModal('manage');
+  else if (action === 'keys') openAccountModal('keys');
   else if (action === 'billing') openAccountModal('manage');
   else if (action === 'projects') {
     closeAccountModal();

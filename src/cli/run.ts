@@ -9,6 +9,7 @@ import { probeMedia, assertHasAudio, type MediaInfo } from '../media/probe.js';
 import { extractAudio } from '../media/extract.js';
 import { assertBinary, FFMPEG, FFPROBE } from '../media/ffmpeg.js';
 import {
+  envWithApiKeys,
   resolveProviderChain,
   transcribeWithFallback,
   assertWordTimings,
@@ -332,7 +333,12 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     await extractAudio(inputPath, audioPath);
     log.info(`→ ${audioPath}`);
 
-    const { mode, providers, skipped } = resolveProviderChain(opts.provider);
+    const asrEnv = envWithApiKeys(process.env, {
+      sarvamApiKey: opts.sarvamApiKey,
+      elevenlabsApiKey: opts.elevenlabsApiKey,
+      deepgramApiKey: opts.deepgramApiKey,
+    });
+    const { mode, providers, skipped } = resolveProviderChain(opts.provider, asrEnv);
     const chainLabel = providers.map((p) => p.name).join(' → ');
     log.step(
       providers.length > 1

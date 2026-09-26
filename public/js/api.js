@@ -20,6 +20,7 @@ async function parseJsonOrThrow(res) {
     const err = new Error(message);
     err.status = res.status;
     err.hint = body?.hint;
+    err.code = body?.code;
     err.body = body;
     throw err;
   }
@@ -57,6 +58,8 @@ export async function createJob(formData, { onUploadProgress } = {}) {
           const err = new Error(body?.error || body?.hint || `Upload failed (${xhr.status})`);
           err.status = xhr.status;
           err.hint = body?.hint;
+          err.code = body?.code;
+          err.body = body;
           reject(err);
         }
       };

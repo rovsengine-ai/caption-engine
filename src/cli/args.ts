@@ -121,6 +121,15 @@ export interface CliOptions {
   verbose: boolean;
   json: boolean;
   yes: boolean;
+  /**
+   * Per-request ASR keys from the web UI (never logged). When set, they override
+   * the matching process.env values for this pipeline run only.
+   */
+  sarvamApiKey?: string;
+  elevenlabsApiKey?: string;
+  deepgramApiKey?: string;
+  /** Skip live ASR and load the bundled offline sample transcript. */
+  demoMode?: boolean;
 }
 
 const HELP = `
