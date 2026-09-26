@@ -2,9 +2,15 @@
    Caption Engine — Editor workspace (app.html)
    ========================================================================== */
 
-html, body { overflow: hidden; }
-body.editor { height: 100vh; }
+body.editor { height: 100vh; overflow: hidden; }
+body.dashboard-page { overflow: auto; min-height: 100vh; }
 
+#view-editor:not([hidden]) {
+  display: block;
+  height: 100vh;
+}
+
+#view-editor #app-root,
 #app-root {
   height: 100vh;
   display: flex;

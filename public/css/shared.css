@@ -239,6 +239,11 @@ html[data-theme='light'] .bg-ambient::after {
   box-shadow: 0 6px 18px -6px var(--accent-glow);
   flex-shrink: 0;
 }
+.nav-logo-text {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
 
 .nav-links {
   display: flex;

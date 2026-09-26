@@ -17,6 +17,9 @@ import {
   sourceUrl,
   downloadUrl,
 } from './api.js';
+import { takePendingMedia } from './pending-media.js';
+import { upsertProject, getProject } from './projects-store.js';
+import { mountUserChrome, userMenuButtonHtml } from './user-session.js';
 
 // ---------------------------------------------------------------------------
 // Module state (in memory only — never persisted)
@@ -105,31 +108,40 @@ function initTheme() {
 }
 
 // ---------------------------------------------------------------------------
-// Routing — /app (upload) and /app/p/:jobId (project)
+// Routing helpers — shell owns /app vs /app/new vs /app/p/:id
 // ---------------------------------------------------------------------------
 
-function parseRouteJobId() {
-  const m = window.location.pathname.match(/^\/app\/p\/([^/]+)/);
-  return m ? m[1] : null;
-}
+/** @type {(path: string) => void} */
+let navigateFn = (path) => {
+  window.history.pushState({}, '', path);
+};
 
 function navigateToProject(jobId) {
-  window.history.pushState({ jobId }, '', `/app/p/${jobId}`);
+  navigateFn(`/app/p/${jobId}`);
 }
 
-function navigateToUpload() {
-  window.history.pushState({}, '', '/app');
+function navigateToDashboard() {
+  navigateFn('/app');
+}
+
+function navigateToNew() {
   resetForNewProject();
+  navigateFn('/app/new');
 }
 
-window.addEventListener('popstate', () => {
-  const jobId = parseRouteJobId();
-  if (jobId) {
-    hydrateProject(jobId);
-  } else {
-    resetForNewProject();
-  }
-});
+function syncProjectMeta(extra = {}) {
+  const id = state.jobId || extra.id;
+  if (!id) return;
+  const title = el('project-title')?.value?.trim() || extra.title || 'Untitled project';
+  upsertProject({
+    id,
+    title,
+    durationSec: Number.isFinite(state.duration) ? state.duration : (extra.durationSec ?? 0),
+    aspect: state.aspect || 'portrait',
+    status: state.jobData?.status || extra.status || 'draft',
+    ...extra,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Generic segmented-control wiring
@@ -341,6 +353,21 @@ function handleFile(file) {
 
   el('btn-generate').disabled = false;
   el('generate-hint').textContent = 'Ready — review options, then generate.';
+
+  const baseTitle = file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Untitled project';
+  const titleInput = el('project-title');
+  if (titleInput && (!titleInput.value || titleInput.value === 'Untitled project')) {
+    titleInput.value = baseTitle;
+  }
+
+  // Probe duration for dashboard metadata — never store the File itself.
+  const onMeta = () => {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      state.duration = video.duration;
+      if (state.jobId) syncProjectMeta({ durationSec: video.duration });
+    }
+  };
+  video.addEventListener('loadedmetadata', onMeta, { once: true });
 }
 
 function clearFile() {
@@ -406,6 +433,13 @@ async function submitGenerate(e) {
       onUploadProgress: (frac) => setProgress(Math.round(frac * 15), 'Uploading your file…'),
     });
     state.jobId = jobId;
+    syncProjectMeta({
+      id: jobId,
+      title: el('project-title')?.value?.trim() || 'Untitled project',
+      durationSec: state.duration || 0,
+      aspect: state.aspect,
+      status: 'running',
+    });
     navigateToProject(jobId);
 
     const titleInput = el('project-title');
@@ -510,6 +544,13 @@ async function onJobDone(jobId) {
   await loadTranscriptAndCuts(jobId);
   ensureVideoSource(jobId);
   el('btn-export').disabled = false;
+  syncProjectMeta({
+    id: jobId,
+    title: el('project-title')?.value?.trim() || state.jobData?.projectTitle || 'Untitled project',
+    durationSec: state.duration || 0,
+    aspect: state.aspect,
+    status: 'done',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -531,7 +572,17 @@ async function hydrateProject(jobId) {
   }
 
   state.jobData = job;
+  const local = getProject(jobId);
   if (job.projectTitle) el('project-title').value = job.projectTitle;
+  else if (local?.title) el('project-title').value = local.title;
+
+  syncProjectMeta({
+    id: jobId,
+    title: el('project-title')?.value?.trim() || local?.title || 'Untitled project',
+    durationSec: state.duration || local?.durationSec || 0,
+    aspect: state.aspect || local?.aspect || 'portrait',
+    status: job.status,
+  });
 
   if (job.status === 'done') {
     hideProgressOverlay();
@@ -928,7 +979,8 @@ function initSafeZone() {
 function initAspectSelect() {
   wireSegmented(el('aspect-select'), (value) => {
     state.aspect = value;
-    el('phone-frame').setAttribute('data-aspect', value);
+    el('phone-frame')?.setAttribute('data-aspect', value);
+    if (state.jobId) syncProjectMeta({ aspect: value });
   }, { lockable: true });
 }
 
@@ -991,6 +1043,7 @@ function initTitleEditing() {
   const input = el('project-title');
   let debounceTimer = null;
   input.addEventListener('input', () => {
+    if (state.jobId) syncProjectMeta({ title: input.value.trim() || 'Untitled project' });
     if (!state.jobId) return;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
@@ -1102,24 +1155,42 @@ function resetForNewProject() {
 }
 
 function initRetryButton() {
-  el('btn-retry').addEventListener('click', () => navigateToUpload());
+  el('btn-retry')?.addEventListener('click', () => navigateToNew());
 }
 
 function initHomeButton() {
-  // Plain link — no special handling needed, but guard against accidental
-  // navigation while a job is mid-flight without warning.
-  el('btn-home').addEventListener('click', (e) => {
+  el('btn-home')?.addEventListener('click', (e) => {
+    // Logo returns to Projects dashboard (SPA), not marketing home.
+    e.preventDefault();
     if (state.jobId && state.jobData?.status !== 'done' && state.jobData?.status !== 'error') {
-      if (!window.confirm('A project is still generating. Leave anyway?')) e.preventDefault();
+      if (!window.confirm('A project is still generating. Leave anyway?')) return;
     }
+    navigateToDashboard();
   });
 }
 
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
+function ensureEditorUserMenu() {
+  const slot = el('editor-user-slot');
+  if (slot && !slot.dataset.ready) {
+    slot.innerHTML = userMenuButtonHtml();
+    slot.dataset.ready = '1';
+  }
+  mountUserChrome();
+}
 
-async function init() {
+export function consumePendingIntoEditor() {
+  const file = takePendingMedia();
+  if (file) handleFile(file);
+  return file;
+}
+
+/**
+ * @param {{ navigate?: (path: string) => void }} [opts]
+ */
+export async function initEditor(opts = {}) {
+  if (typeof opts.navigate === 'function') navigateFn = opts.navigate;
+
+  ensureEditorUserMenu();
   initTheme();
   initRail();
   initInspectorTabs();
@@ -1136,14 +1207,35 @@ async function init() {
   initRetryButton();
   initHomeButton();
 
-  el('generate-form').addEventListener('submit', submitGenerate);
+  el('generate-form')?.addEventListener('submit', submitGenerate);
 
   await loadMeta();
-
-  const jobId = parseRouteJobId();
-  if (jobId) {
-    await hydrateProject(jobId);
-  }
 }
 
-document.addEventListener('DOMContentLoaded', init);
+/**
+ * @param {{ mode: 'new'|'project', id?: string }} route
+ */
+export async function showEditor(route) {
+  const dash = el('view-dashboard');
+  const editor = el('view-editor');
+  if (dash) dash.hidden = true;
+  if (editor) editor.hidden = false;
+  document.title = 'Caption Engine — Editor';
+  document.body.classList.add('editor');
+  ensureEditorUserMenu();
+
+  if (route.mode === 'project' && route.id) {
+    if (state.jobId !== route.id) {
+      await hydrateProject(route.id);
+    }
+    return;
+  }
+
+  // /app/new — draft workspace; pull pending File from dashboard handoff.
+  if (!state.jobId) {
+    resetForNewProject();
+  } else if (route.mode === 'new') {
+    resetForNewProject();
+  }
+  consumePendingIntoEditor();
+}

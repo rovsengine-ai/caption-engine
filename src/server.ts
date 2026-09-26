@@ -360,8 +360,8 @@ app.use(express.static(PUBLIC_DIR, {
   maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
 }));
 
-/** Editor SPA shell for /app and /app/p/:id */
-app.get(['/app', '/app/', '/app/p/:id'], (req: Request, res: Response) => {
+/** App SPA shell — dashboard (/app), new draft (/app/new), project (/app/p/:id) */
+app.get(['/app', '/app/', '/app/new', '/app/new/', '/app/p/:id'], (req: Request, res: Response) => {
   const appPage = join(PUBLIC_DIR, 'app.html');
   if (existsSync(appPage)) {
     res.sendFile(appPage);
