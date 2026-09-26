@@ -1,7 +1,44 @@
+---
+title: Caption Engine
+emoji: 🎬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
 # caption-engine
 
 Word-timed captions, Auto Trim and clip finding for Indic and Hinglish video.
-TypeScript + FFmpeg. No web framework, no cloud service required beyond the ASR provider.
+TypeScript + FFmpeg. CLI locally, or the free **Hugging Face Spaces** web UI (Docker).
+
+## Web UI (Hugging Face Spaces)
+
+A browser app ships with this repo for free Docker Spaces deployment:
+
+1. Upload a video (kept as an in-memory `File` in the browser — **no** `localStorage`, IndexedDB, Cache API, or OPFS).
+2. Preview instantly via `URL.createObjectURL` (revoked on clear / replace).
+3. Choose language, script (native / roman), style, aspect, Auto Trim, and output formats.
+4. Watch live progress over Server-Sent Events while the engine extracts audio, transcribes, and renders.
+5. Download captioned MP4 / SRT / ASS / JSON. Server temp files are deleted in `try…finally`.
+
+### Run locally
+
+```bash
+npm install
+npm run fonts:install   # once, if assets/fonts is empty
+# Set ASR keys (see .env.example), e.g. ELEVENLABS_API_KEY
+npm run web             # http://0.0.0.0:7860
+```
+
+### Deploy on Hugging Face Spaces
+
+1. Create a new Space → **Docker** SDK.
+2. Push this repository (or connect the GitHub repo).
+3. In Space **Settings → Variables and secrets**, add your ASR keys (`ELEVENLABS_API_KEY`, and optionally `SARVAM_API_KEY` / `DEEPGRAM_API_KEY` / `ASR_PROVIDER`).
+4. The `Dockerfile` installs FFmpeg, fonts, builds TypeScript, and starts `node dist/src/server.js` on port **7860** as user `1000`.
+
+## CLI
 
 ```bash
 npm install

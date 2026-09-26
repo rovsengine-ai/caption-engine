@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Caption Engine</title>
+  <meta name="description" content="Word-timed captions for Indic and Hinglish video. Upload, caption, download — nothing stored in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Caption Engine</h1>
+          <p class="tagline">Word-timed captions · Auto Trim · Indic + Hinglish</p>
+        </div>
+      </div>
+      <p class="privacy-badge" title="Videos stay in memory on this device until upload. No localStorage, IndexedDB, or Cache API.">
+        Zero browser storage
+      </p>
+    </header>
+
+    <main class="layout">
+      <section class="panel preview-panel" aria-labelledby="upload-heading">
+        <div class="panel-head">
+          <h2 id="upload-heading">Video</h2>
+          <span id="file-meta" class="muted"></span>
+        </div>
+
+        <div
+          id="dropzone"
+          class="dropzone"
+          tabindex="0"
+          role="button"
+          aria-label="Drop a video here or choose a file"
+        >
+          <input id="file-input" type="file" accept="video/*,audio/*,.mp4,.mov,.mkv,.webm,.wav,.mp3,.m4a" hidden />
+          <div id="drop-empty" class="drop-empty">
+            <strong>Drop a video</strong>
+            <span>or click to choose · stays in memory until you generate</span>
+          </div>
+          <video id="preview" class="preview" playsinline controls hidden></video>
+        </div>
+
+        <div class="preview-actions">
+          <button type="button" id="btn-clear" class="btn ghost" disabled>Clear</button>
+          <button type="button" id="btn-pick" class="btn secondary">Choose file</button>
+        </div>
+      </section>
+
+      <section class="panel options-panel" aria-labelledby="options-heading">
+        <div class="panel-head">
+          <h2 id="options-heading">Caption options</h2>
+        </div>
+
+        <form id="options-form" class="options">
+          <label class="field">
+            <span>Language</span>
+            <select id="language" name="language"></select>
+          </label>
+
+          <label class="field">
+            <span>Script</span>
+            <select id="script" name="script">
+              <option value="native">Native script</option>
+              <option value="roman">Roman / Hinglish</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Style</span>
+            <select id="style" name="style"></select>
+          </label>
+
+          <label class="field">
+            <span>Aspect</span>
+            <select id="aspect" name="aspect">
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Landscape</option>
+              <option value="square">Square</option>
+              <option value="original">Original</option>
+            </select>
+          </label>
+
+          <fieldset class="field formats">
+            <legend>Output formats</legend>
+            <label><input type="checkbox" name="formats" value="mp4" checked /> MP4</label>
+            <label><input type="checkbox" name="formats" value="srt" /> SRT</label>
+            <label><input type="checkbox" name="formats" value="ass" /> ASS</label>
+            <label><input type="checkbox" name="formats" value="json" /> JSON</label>
+          </fieldset>
+
+          <label class="toggle">
+            <input type="checkbox" id="auto-trim" name="autoTrim" />
+            <span>Auto Trim (silence &amp; fillers)</span>
+          </label>
+
+          <label class="toggle">
+            <input type="checkbox" id="code-switching" name="codeSwitching" />
+            <span>Code-switching (Hinglish / mixed)</span>
+          </label>
+
+          <button type="submit" id="btn-generate" class="btn primary" disabled>
+            Generate captions
+          </button>
+        </form>
+      </section>
+
+      <section class="panel progress-panel" aria-labelledby="progress-heading">
+        <div class="panel-head">
+          <h2 id="progress-heading">Progress</h2>
+          <span id="job-status" class="status-pill idle">Idle</span>
+        </div>
+
+        <div class="progress-track" aria-hidden="true">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="progress-label" class="progress-label muted">Waiting for a video…</p>
+
+        <div id="upload-progress" class="upload-progress" hidden>
+          <span>Uploading</span>
+          <strong id="upload-pct">0%</strong>
+        </div>
+
+        <ol id="log" class="log" aria-live="polite"></ol>
+
+        <div id="downloads" class="downloads" hidden>
+          <h3>Downloads</h3>
+          <div id="download-links" class="download-links"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p>
+        Files are streamed to a temporary server job and deleted after processing.
+        Nothing is written to <code>localStorage</code>, IndexedDB, or the Cache API.
+      </p>
+    </footer>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
