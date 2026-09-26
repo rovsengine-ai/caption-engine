@@ -17,6 +17,10 @@ import {
   createJobFromStagedUpload,
   destroyJob,
   getJob,
+  listJobCuts,
+  readJobTranscript,
+  setCutRestored,
+  setProjectTitle,
   subscribe,
   unsubscribe,
   uploadsStagingDir,
@@ -202,13 +206,92 @@ app.get('/api/jobs/:jobId', (req: Request, res: Response) => {
     status: job.status,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    projectTitle: job.projectTitle,
+    originalName: job.originalName,
     formats: job.requestedFormats,
     outputs: Object.fromEntries(
       Object.keys(job.outputs).map((k) => [k, `/api/download/${job.id}/${k}`]),
     ),
     result: job.result,
     error: job.error,
+    cutsCount: job.cuts.length,
+    cutsActive: job.cuts.filter((c) => !c.restored).length,
+    cutsRestored: job.cuts.filter((c) => c.restored).length,
   });
+});
+
+app.patch('/api/jobs/:jobId', (req: Request, res: Response) => {
+  const jobId = param(req.params.jobId);
+  const job = getJob(jobId);
+  if (!job) {
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
+  if (typeof req.body?.projectTitle === 'string') {
+    setProjectTitle(jobId, req.body.projectTitle);
+  }
+  res.json({ id: job.id, projectTitle: job.projectTitle });
+});
+
+app.get('/api/jobs/:jobId/cuts', (req: Request, res: Response) => {
+  const cuts = listJobCuts(param(req.params.jobId));
+  if (!cuts) {
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
+  res.json({
+    cuts,
+    summary: {
+      total: cuts.length,
+      active: cuts.filter((c) => !c.restored).length,
+      restored: cuts.filter((c) => c.restored).length,
+      secondsRemoved: cuts
+        .filter((c) => !c.restored)
+        .reduce((n, c) => n + (c.end - c.start), 0),
+    },
+  });
+});
+
+app.patch('/api/jobs/:jobId/cuts/:cutId', (req: Request, res: Response) => {
+  const jobId = param(req.params.jobId);
+  const cutId = param(req.params.cutId);
+  const restored = Boolean(req.body?.restored);
+  const cut = setCutRestored(jobId, cutId, restored);
+  if (!cut) {
+    res.status(404).json({ error: 'Job or cut not found' });
+    return;
+  }
+  res.json({ cut, message: restored ? 'Cut restored (will be kept in export)' : 'Cut re-applied' });
+});
+
+app.get('/api/jobs/:jobId/transcript', (req: Request, res: Response) => {
+  const doc = readJobTranscript(param(req.params.jobId));
+  if (!doc) {
+    res.status(404).json({ error: 'Transcript not available' });
+    return;
+  }
+  res.json(doc);
+});
+
+/** Stream the original upload for the editor canvas (ephemeral server tmp). */
+app.get('/api/jobs/:jobId/source', (req: Request, res: Response) => {
+  const job = getJob(param(req.params.jobId));
+  if (!job || !existsSync(job.inputPath)) {
+    res.status(404).json({ error: 'Source media not available' });
+    return;
+  }
+  const size = statSync(job.inputPath).size;
+  const ext = extname(job.inputPath).toLowerCase();
+  const type =
+    ext === '.webm' ? 'video/webm'
+      : ext === '.mov' ? 'video/quicktime'
+        : ext === '.mp3' ? 'audio/mpeg'
+          : ext === '.wav' ? 'audio/wav'
+            : 'video/mp4';
+  res.setHeader('Content-Type', type);
+  res.setHeader('Content-Length', String(size));
+  res.setHeader('Accept-Ranges', 'bytes');
+  createReadStream(job.inputPath).pipe(res);
 });
 
 const DOWNLOAD_TYPES: Record<string, string> = {
@@ -218,6 +301,7 @@ const DOWNLOAD_TYPES: Record<string, string> = {
   json: 'application/json; charset=utf-8',
   transcript: 'application/json; charset=utf-8',
   clips: 'application/json; charset=utf-8',
+  cuts: 'application/json; charset=utf-8',
 };
 
 function sendDownload(req: Request, res: Response, headOnly: boolean): void {
@@ -245,6 +329,7 @@ function sendDownload(req: Request, res: Response, headOnly: boolean): void {
   let downloadName = `captioned.${format}`;
   if (format === 'transcript') downloadName = 'transcript.json';
   if (format === 'clips') downloadName = 'clips.json';
+  if (format === 'cuts') downloadName = 'cuts.json';
 
   res.setHeader('Content-Type', type);
   res.setHeader('Content-Length', String(size));
@@ -275,10 +360,28 @@ app.use(express.static(PUBLIC_DIR, {
   maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
 }));
 
+/** Editor SPA shell for /app and /app/p/:id */
+app.get(['/app', '/app/', '/app/p/:id'], (req: Request, res: Response) => {
+  const appPage = join(PUBLIC_DIR, 'app.html');
+  if (existsSync(appPage)) {
+    res.sendFile(appPage);
+    return;
+  }
+  res.status(404).send('Editor UI missing — public/app.html');
+});
+
 app.get(/^(?!\/api\/).*/, (req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     next();
     return;
+  }
+  // Deep-link editor paths that static missed
+  if (req.path.startsWith('/app')) {
+    const appPage = join(PUBLIC_DIR, 'app.html');
+    if (existsSync(appPage)) {
+      res.sendFile(appPage);
+      return;
+    }
   }
   const index = join(PUBLIC_DIR, 'index.html');
   if (existsSync(index)) {

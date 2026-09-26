@@ -28,6 +28,12 @@ export interface CliOptions {
   autoTrim: boolean;
   trimSilence: number;
   keepFillers: boolean;
+  /**
+   * When set, overrides the legacy coupling of false-start removal to
+   * `keepFillers`. The web editor uses this for an independent
+   * "Remove Repetitions" toggle.
+   */
+  removeFalseStarts?: boolean;
   /** error | native | http — what to do when Roman output is unavailable. */
   romanFallback: 'error' | 'native' | 'http';
   /** Suppress Auto Trim proposals below this confidence, 0..1. */

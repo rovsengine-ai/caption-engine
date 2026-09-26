@@ -9,9 +9,35 @@ import {
   PROVIDER_MODES,
   type ProviderMode,
 } from '../asr/index.js';
+import {
+  autoTrimToCliFragment,
+  parseAutoTrimControls,
+  publicAutoTrimMeta,
+} from './autotrim-presets.js';
+import { join } from 'node:path';
 
 const ASPECTS: AspectPreset[] = ['portrait', 'landscape', 'square', 'original'];
 const FORMATS: Array<'mp4' | 'srt' | 'ass' | 'json'> = ['mp4', 'srt', 'ass', 'json'];
+
+/** FluxoCut-style template gallery → engine style preset (+ motion hint). */
+export const TEMPLATE_GALLERY = [
+  { id: 'ink-flow', name: 'Ink Flow', style: 'lyric', motion: 'subtle', blurb: 'Cursive energy, soft glow' },
+  { id: 'script-duo', name: 'Script Duo', style: 'elegant', motion: 'subtle', blurb: 'Bold sans + script accent' },
+  { id: 'type-stairs', name: 'Type Stairs', style: 'editorial', motion: 'expressive', blurb: 'Stepped typographic stack' },
+  { id: 'word-stairs', name: 'Word Stairs', style: 'kinetic', motion: 'expressive', blurb: 'Word-by-word climb' },
+  { id: 'slice-glow', name: 'Slice Glow', style: 'neon', motion: 'expressive', blurb: 'Neon sliced glow' },
+  { id: 'zyada', name: 'Zyada', style: 'minimal', motion: 'subtle', blurb: 'Hyper clean green outline' },
+  { id: 'hyper-clean', name: 'Hyper Clean', style: 'minimal', motion: 'none', blurb: 'Minimal outline glow' },
+  { id: 'editorial', name: 'Editorial', style: 'editorial', motion: 'none', blurb: 'Magazine-clean serif/sans' },
+  { id: 'pop-viral', name: 'Pop Viral', style: 'pop', motion: 'expressive', blurb: 'High-impact active word pop' },
+  { id: 'viral-minimal', name: 'Viral Minimalist', style: 'creator', motion: 'subtle', blurb: 'Quiet flex, loud word' },
+  { id: 'active-box', name: 'Active Box', style: 'karaoke', motion: 'subtle', blurb: 'Pill behind spoken word' },
+  { id: 'ekdam', name: 'Ekdam', style: 'bold', motion: 'expressive', blurb: 'Punchy uppercase kinetic' },
+  { id: 'kinetic-stack', name: 'Kinetic Stack', style: 'kinetic', motion: 'expressive', blurb: 'Stacked word hits' },
+  { id: 'neon-script', name: 'Neon Script', style: 'neon', motion: 'subtle', blurb: 'Cyan neon script vibe' },
+  { id: 'felt', name: 'Felt', style: 'soft', motion: 'subtle', blurb: 'Warm soft caption feel' },
+  { id: 'trio-lockup', name: 'Trio Lockup', style: 'classic', motion: 'none', blurb: 'Three-word lockup' },
+] as const;
 
 export interface JobUiOptions {
   language?: string;
@@ -108,10 +134,39 @@ function parseProvider(raw: unknown): ProviderMode {
   return v;
 }
 
+function resolveTemplateStyle(body: Record<string, unknown>): {
+  style: string;
+  motion: CliOptions['motion'];
+} {
+  const templateId = typeof body.template === 'string' ? body.template.trim().toLowerCase() : '';
+  if (templateId) {
+    const t = TEMPLATE_GALLERY.find((x) => x.id === templateId);
+    if (t) {
+      return {
+        style: t.style,
+        motion: (t.motion as CliOptions['motion']) || 'none',
+      };
+    }
+  }
+
+  const style = typeof body.style === 'string' && body.style.trim()
+    ? body.style.trim()
+    : 'default';
+  if (!listStylePresets().includes(style)) {
+    throw new CaptionEngineError(
+      `Unknown style "${style}".`,
+      `Available: ${listStylePresets().join(', ')}`,
+    );
+  }
+  const motionRaw = typeof body.motion === 'string' ? body.motion.trim().toLowerCase() : 'none';
+  const motion = (['none', 'subtle', 'expressive', 'auto'].includes(motionRaw)
+    ? motionRaw
+    : 'none') as CliOptions['motion'];
+  return { style, motion };
+}
+
 /**
  * Map multipart form fields (or a JSON body) into CliOptions.
- * Returns both the pipeline options and the exact formats the UI requested
- * (so downloads can hide formats the user did not ask for when `format=all`).
  */
 export function uiOptionsToCli(
   inputPath: string,
@@ -128,15 +183,7 @@ export function uiOptionsToCli(
     throw new CaptionEngineError(`Unknown script "${scriptRaw}".`, 'Valid: native, roman');
   }
 
-  const style = typeof body.style === 'string' && body.style.trim()
-    ? body.style.trim()
-    : 'default';
-  if (!listStylePresets().includes(style)) {
-    throw new CaptionEngineError(
-      `Unknown style "${style}".`,
-      `Available: ${listStylePresets().join(', ')}`,
-    );
-  }
+  const { style, motion } = resolveTemplateStyle(body);
 
   const aspectRaw = typeof body.aspect === 'string' ? body.aspect.trim().toLowerCase() : 'portrait';
   if (!(ASPECTS as string[]).includes(aspectRaw)) {
@@ -147,9 +194,19 @@ export function uiOptionsToCli(
   }
 
   const requestedFormats = parseFormats(body.formats ?? body.format);
-  const autoTrim = parseBool(body.autoTrim ?? body.auto_trim);
   const codeSwitching = parseBool(body.codeSwitching ?? body.code_switching);
   const provider = parseProvider(body.provider);
+  const trimControls = parseAutoTrimControls(body);
+  const trimCli = autoTrimToCliFragment(trimControls);
+
+  const outputDir = join(outputPath, '..');
+  const cutsOut = join(outputDir, 'cuts.json');
+  const transcriptOut = join(outputDir, 'transcript.json');
+
+  const maxWordsRaw = body.maxWordsPerCue ?? body.max_words;
+  const maxWordsPerCue = maxWordsRaw !== undefined && maxWordsRaw !== ''
+    ? Number(maxWordsRaw)
+    : undefined;
 
   const opts = baseCliOptions({
     input: inputPath,
@@ -158,12 +215,24 @@ export function uiOptionsToCli(
     language,
     script: scriptRaw,
     style,
+    motion,
     aspect: aspectRaw as AspectPreset,
     format: toPipelineFormat(requestedFormats),
-    autoTrim,
     codeSwitching,
     provider,
-    // Spaces jobs should not hang waiting for interactive confirmation.
+    autoTrim: trimCli.autoTrim,
+    trimSilence: trimCli.trimSilence,
+    keepFillers: trimCli.keepFillers,
+    removeFalseStarts: trimCli.removeFalseStarts,
+    fillerConfidence: trimCli.fillerConfidence,
+    minCutConfidence: trimCli.minCutConfidence,
+    analyzeVideo: trimCli.analyzeVideo,
+    // Always persist cuts + transcript for the editor restore / cue list APIs.
+    cutsOut: trimCli.autoTrim ? cutsOut : undefined,
+    transcriptOut,
+    ...(maxWordsPerCue !== undefined && Number.isFinite(maxWordsPerCue)
+      ? { maxWordsPerCue: Math.max(1, Math.min(20, maxWordsPerCue)) }
+      : {}),
     yes: true,
     verbose: true,
   });
@@ -183,12 +252,14 @@ export function publicMeta() {
       })),
     ],
     styles: listStylePresets(),
+    templates: TEMPLATE_GALLERY,
     aspects: ASPECTS,
     scripts: [
       { value: 'native', label: 'Native script' },
       { value: 'roman', label: 'Hinglish / Roman' },
     ],
     formats: FORMATS,
+    autoTrim: publicAutoTrimMeta(),
     providers: [
       {
         value: 'sarvam_fallback_elevenlabs',

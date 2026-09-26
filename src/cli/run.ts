@@ -727,7 +727,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       ...DEFAULT_TRIM_OPTIONS,
       maxSilenceSec: opts.trimSilence,
       removeFillers: !opts.keepFillers,
-      removeFalseStarts: !opts.keepFillers,
+      removeFalseStarts: opts.removeFalseStarts ?? !opts.keepFillers,
       minCutConfidence: opts.minCutConfidence ?? DEFAULT_TRIM_OPTIONS.minCutConfidence,
       audio,
       minFillerDurationSec: opts.minFillerDuration ?? DEFAULT_TRIM_OPTIONS.minFillerDurationSec,

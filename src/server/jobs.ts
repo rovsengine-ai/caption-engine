@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -6,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { Reporter, RunResult } from '../cli/run.js';
 import { runPipeline } from '../cli/run.js';
 import type { CliOptions } from '../cli/args.js';
+import type { Cut } from '../types.js';
 import { CaptionEngineError } from '../errors.js';
 import { loadEnv, redactSecrets } from '../config/env.js';
 import { uiOptionsToCli } from './options.js';
@@ -27,6 +36,7 @@ export interface JobPublicResult {
   transliteration?: RunResult['transliteration'];
   tooling: RunResult['tooling'];
   formats: string[];
+  projectTitle?: string;
 }
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
@@ -47,9 +57,13 @@ export interface JobRecord {
   error?: string;
   result?: JobPublicResult;
   expiresAt: number;
+  /** In-memory cut list for restore API (mirrors cuts.json when present). */
+  cuts: Cut[];
+  projectTitle: string;
+  originalName?: string;
 }
 
-const JOB_TTL_MS = 30 * 60 * 1000;
+const JOB_TTL_MS = 60 * 60 * 1000;
 const MAX_EVENTS_BUFFER = 500;
 const jobs = new Map<string, JobRecord>();
 
@@ -84,7 +98,6 @@ function makeReporter(job: JobRecord): Reporter {
   };
 }
 
-/** Remove a path tree if it exists. Best-effort. */
 export function safeRm(path: string | undefined): void {
   if (!path) return;
   try {
@@ -94,16 +107,11 @@ export function safeRm(path: string | undefined): void {
   }
 }
 
-/**
- * Delete intermediate artifacts but keep downloadable outputs.
- * Called from the pipeline's finally block.
- */
+/** Scratch only — keep input + outputs for the editor until TTL. */
 function cleanupIntermediates(job: JobRecord): void {
   safeRm(job.workDir);
-  safeRm(job.inputPath);
 }
 
-/** Delete the entire job directory (outputs included). */
 export function destroyJob(jobId: string): boolean {
   const job = jobs.get(jobId);
   if (!job) return false;
@@ -137,17 +145,82 @@ function ensureExtension(filename: string | undefined, fallbackPath: string): st
   return fromPath || '.mp4';
 }
 
+function loadCutsFromDisk(path: string | undefined): Cut[] {
+  if (!path || !existsSync(path)) return [];
+  try {
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { cuts?: Cut[] };
+    return Array.isArray(doc.cuts) ? doc.cuts : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCuts(job: JobRecord): void {
+  const path = job.outputs.cuts ?? join(job.outputDir, 'cuts.json');
+  let stamp: unknown = undefined;
+  if (existsSync(path)) {
+    try {
+      const prev = JSON.parse(readFileSync(path, 'utf8')) as { _engine?: unknown };
+      stamp = prev._engine;
+    } catch {
+      /* ignore */
+    }
+  }
+  writeFileSync(
+    path,
+    JSON.stringify({ ...(stamp ? { _engine: stamp } : {}), cuts: job.cuts }, null, 2),
+    'utf8',
+  );
+  job.outputs.cuts = path;
+}
+
+export function listJobCuts(jobId: string): Cut[] | null {
+  const job = jobs.get(jobId);
+  if (!job) return null;
+  return job.cuts;
+}
+
+/**
+ * Non-destructive restore / re-apply: flip `restored` on a cut by id.
+ * Restored cuts are skipped at render time by the engine.
+ */
+export function setCutRestored(jobId: string, cutId: string, restored: boolean): Cut | null {
+  const job = jobs.get(jobId);
+  if (!job) return null;
+  const cut = job.cuts.find((c) => c.id === cutId);
+  if (!cut) return null;
+  cut.restored = restored;
+  persistCuts(job);
+  job.updatedAt = Date.now();
+  return cut;
+}
+
+export function readJobTranscript(jobId: string): unknown | null {
+  const job = jobs.get(jobId);
+  if (!job) return null;
+  const path = job.outputs.transcript ?? join(job.outputDir, 'transcript.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+export function setProjectTitle(jobId: string, title: string): boolean {
+  const job = jobs.get(jobId);
+  if (!job) return false;
+  job.projectTitle = title.trim().slice(0, 120) || job.projectTitle;
+  if (job.result) job.result.projectTitle = job.projectTitle;
+  return true;
+}
+
 export interface CreateJobParams {
-  /** Absolute path of a file already streamed to disk (e.g. multer temp). */
   stagedPath: string;
   originalName?: string;
   fields: Record<string, unknown>;
 }
 
-/**
- * Take ownership of a staged upload (rename into the job dir), register the
- * job, and start runPipeline(). Returns immediately; progress arrives over SSE.
- */
 export function createJobFromStagedUpload(params: CreateJobParams): { jobId: string } {
   sweepExpiredJobs();
 
@@ -170,8 +243,6 @@ export function createJobFromStagedUpload(params: CreateJobParams): { jobId: str
   try {
     renameSync(params.stagedPath, inputPath);
   } catch {
-    // Cross-device rename can fail; fall back to copy+delete via streams would
-    // be heavy — for Spaces, /tmp is one filesystem. If rename fails, surface it.
     safeRm(jobDir);
     safeRm(params.stagedPath);
     throw new CaptionEngineError('Failed to place uploaded file in the job directory.');
@@ -188,6 +259,7 @@ export function createJobFromStagedUpload(params: CreateJobParams): { jobId: str
     throw err;
   }
 
+  const titleBase = (params.originalName || 'Untitled project').replace(/\.[^.]+$/, '');
   const now = Date.now();
   const job: JobRecord = {
     id,
@@ -203,6 +275,9 @@ export function createJobFromStagedUpload(params: CreateJobParams): { jobId: str
     events: [],
     listeners: new Set(),
     expiresAt: now + JOB_TTL_MS,
+    cuts: [],
+    projectTitle: titleBase.slice(0, 80) || 'Untitled project',
+    originalName: params.originalName,
   };
   jobs.set(id, job);
   emit(job, { type: 'queued', message: 'Upload received. Starting caption pipeline…' });
@@ -220,7 +295,7 @@ async function runJob(job: JobRecord, opts: CliOptions): Promise<void> {
 
     const filtered: Record<string, string> = {};
     for (const [key, path] of Object.entries(result.outputs)) {
-      if (key === 'transcript' || key === 'clips') {
+      if (key === 'transcript' || key === 'clips' || key === 'cuts') {
         if (existsSync(path)) filtered[key] = path;
         continue;
       }
@@ -235,12 +310,14 @@ async function runJob(job: JobRecord, opts: CliOptions): Promise<void> {
     }
 
     job.outputs = filtered;
+    job.cuts = loadCutsFromDisk(filtered.cuts);
     job.result = {
       transcript: result.transcript,
       trim: result.trim,
       transliteration: result.transliteration,
       tooling: result.tooling,
       formats: Object.keys(filtered),
+      projectTitle: job.projectTitle,
     };
     job.status = 'done';
     job.expiresAt = Date.now() + JOB_TTL_MS;
