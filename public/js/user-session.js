@@ -167,7 +167,7 @@ function renderContent() {
         ${PLANS.map((p) => `
           <button type="button" class="plan-pick ${selectedPlanId === p.id ? 'selected' : ''}" data-plan="${p.id}">
             <strong>${p.name}</strong>
-            <span class="price">${p.price}<small>${p.cadence}</small></span>
+            <span class="price">${p.price} <small>${p.cadence}</small></span>
             <span class="blurb">${p.blurb}</span>
           </button>`).join('')}
       </div>
