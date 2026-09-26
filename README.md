@@ -35,8 +35,8 @@ npm run web             # http://0.0.0.0:7860
 
 1. Create a new Space → **Docker** SDK.
 2. Push this repository (or connect the GitHub repo).
-3. In Space **Settings → Variables and secrets**, add your ASR keys (`ELEVENLABS_API_KEY`, and optionally `SARVAM_API_KEY` / `DEEPGRAM_API_KEY` / `ASR_PROVIDER`).
-4. The `Dockerfile` installs FFmpeg, fonts, builds TypeScript, and starts `node dist/src/server.js` on port **7860** as user `1000`.
+3. In Space **Settings → Variables and secrets**, add `SARVAM_API_KEY` and `ELEVENLABS_API_KEY` (default mode is `sarvam_fallback_elevenlabs`: Sarvam first, ElevenLabs when Sarvam fails or lacks word timings). Optional: `DEEPGRAM_API_KEY`, `ASR_PROVIDER`.
+4. The `Dockerfile` installs FFmpeg/ffprobe, fonts, builds TypeScript, and starts `node dist/src/server.js` on port **7860** as user `1000`.
 
 ## CLI
 

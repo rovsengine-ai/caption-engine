@@ -6,6 +6,7 @@ import {
   assertValidAnimationTemplateName,
   type MotionLevel,
 } from '../captions/animation.js';
+import { isProviderMode, PROVIDER_MODES } from '../asr/index.js';
 
 export type OutputFormat = 'mp4' | 'srt' | 'ass' | 'json' | 'all';
 
@@ -142,7 +143,10 @@ CORE OPTIONS
                             kan→kn, tam→ta, tel→te, mal→ml, ben→bn, guj→gu,
                             pan→pa, ori→or, asm→as, nep→ne, mar→mr, eng→en).
   -f, --format <fmt>        mp4 | srt | ass | json | all          (default: from -o, else mp4)
-  -p, --provider <name>     elevenlabs | deepgram | sarvam        (default: $ASR_PROVIDER or elevenlabs)
+  -p, --provider <name>     sarvam_fallback_elevenlabs | sarvam | elevenlabs | deepgram
+                            (default: $ASR_PROVIDER or sarvam_fallback_elevenlabs)
+                            sarvam_fallback_elevenlabs tries Sarvam first, then
+                            ElevenLabs Scribe when Sarvam fails or lacks word timings
 
 APPEARANCE
       --style <name>        ${listStylePresets().join(' | ')}   (default: default)
@@ -343,7 +347,7 @@ ENVIRONMENT
   TRANSLITERATE_PROVIDER default backend for --script roman
   TRANSLITERATE_URL      endpoint for --transliterate http
   HINGLISH_GLOSSARY      default extra glossary file
-  ASR_PROVIDER           default provider
+  ASR_PROVIDER           default provider (sarvam_fallback_elevenlabs | sarvam | elevenlabs | deepgram)
   FFMPEG_PATH / FFPROBE_PATH   custom binary locations
   FONT_DIR               extra font directories (colon-separated)
 `;
@@ -448,7 +452,18 @@ export function parseArgs(argv: string[]): ParsedCommand {
     switch (a) {
       case '-o': case '--output': o.output = needValue(a, next); i++; break;
       case '-l': case '--language': o.language = needValue(a, next); i++; break;
-      case '-p': case '--provider': o.provider = needValue(a, next); i++; break;
+      case '-p': case '--provider': {
+        const v = needValue(a, next).toLowerCase();
+        if (!isProviderMode(v)) {
+          throw new CaptionEngineError(
+            `Unknown --provider "${v}".`,
+            `Valid: ${PROVIDER_MODES.join(', ')}`,
+          );
+        }
+        o.provider = v;
+        i++;
+        break;
+      }
       case '-f': case '--format': {
         const v = needValue(a, next) as OutputFormat;
         if (!FORMATS.includes(v)) {

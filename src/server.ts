@@ -84,6 +84,29 @@ const upload = multer({
 
 const app = express();
 app.disable('x-powered-by');
+
+// CORS: allow Spaces iframe/preview and local dev. Uploads are same-origin in
+// the shipped UI; this keeps the API usable from a separate frontend origin.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With',
+  );
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => {
@@ -197,7 +220,7 @@ const DOWNLOAD_TYPES: Record<string, string> = {
   clips: 'application/json; charset=utf-8',
 };
 
-app.get('/api/download/:jobId/:format', (req: Request, res: Response) => {
+function sendDownload(req: Request, res: Response, headOnly: boolean): void {
   const job = getJob(param(req.params.jobId));
   const format = param(req.params.format).toLowerCase();
   if (!job) {
@@ -226,8 +249,15 @@ app.get('/api/download/:jobId/:format', (req: Request, res: Response) => {
   res.setHeader('Content-Type', type);
   res.setHeader('Content-Length', String(size));
   res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+  if (headOnly) {
+    res.status(200).end();
+    return;
+  }
   createReadStream(filePath).pipe(res);
-});
+}
+
+app.head('/api/download/:jobId/:format', (req, res) => sendDownload(req, res, true));
+app.get('/api/download/:jobId/:format', (req, res) => sendDownload(req, res, false));
 
 app.delete('/api/jobs/:jobId', (req: Request, res: Response) => {
   const ok = destroyJob(param(req.params.jobId));

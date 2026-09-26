@@ -4,33 +4,41 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caption Engine</title>
-  <meta name="description" content="Word-timed captions for Indic and Hinglish video. Upload, caption, download — nothing stored in your browser." />
+  <meta name="description" content="Premium word-timed captions for Indic and Hinglish video. Zero browser storage." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="noise" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
   <div class="app">
-    <header class="top">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
+    <header class="hero">
+      <div class="brand-block">
+        <div class="logo" aria-hidden="true">
+          <span class="logo-bar"></span>
+          <span class="logo-bar short"></span>
+          <span class="logo-bar"></span>
+        </div>
         <div>
-          <h1>Caption Engine</h1>
-          <p class="tagline">Word-timed captions · Auto Trim · Indic + Hinglish</p>
+          <p class="eyebrow">Caption Engine</p>
+          <h1>Ship word-timed captions that actually shape Indic scripts.</h1>
+          <p class="lede">Upload once. Preview instantly. Sarvam AI first, ElevenLabs fallback. Nothing persists in your browser.</p>
         </div>
       </div>
-      <p class="privacy-badge" title="Videos stay in memory on this device until upload. No localStorage, IndexedDB, or Cache API.">
-        Zero browser storage
-      </p>
+      <div class="hero-badges">
+        <span class="chip accent">Zero browser storage</span>
+        <span class="chip">Sarvam → ElevenLabs</span>
+        <span class="chip">FFmpeg · HarfBuzz · resvg</span>
+      </div>
     </header>
 
-    <main class="layout">
-      <section class="panel preview-panel" aria-labelledby="upload-heading">
-        <div class="panel-head">
-          <h2 id="upload-heading">Video</h2>
-          <span id="file-meta" class="muted"></span>
+    <main class="grid">
+      <!-- Upload / preview -->
+      <section class="glass panel preview-panel">
+        <div class="panel-title">
+          <h2>Media</h2>
+          <span id="file-meta" class="meta-pill" hidden></span>
         </div>
 
         <div
@@ -42,105 +50,150 @@
         >
           <input id="file-input" type="file" accept="video/*,audio/*,.mp4,.mov,.mkv,.webm,.wav,.mp3,.m4a" hidden />
           <div id="drop-empty" class="drop-empty">
-            <strong>Drop a video</strong>
-            <span>or click to choose · stays in memory until you generate</span>
+            <div class="drop-icon" aria-hidden="true"></div>
+            <strong>Drop your video</strong>
+            <span>or click to browse · kept in memory only until you generate</span>
           </div>
-          <video id="preview" class="preview" playsinline controls hidden></video>
+          <div id="preview-wrap" class="preview-wrap" hidden>
+            <video id="preview" class="preview" playsinline controls></video>
+          </div>
         </div>
 
-        <div class="preview-actions">
+        <div class="row-actions">
           <button type="button" id="btn-clear" class="btn ghost" disabled>Clear</button>
-          <button type="button" id="btn-pick" class="btn secondary">Choose file</button>
+          <button type="button" id="btn-pick" class="btn soft">Choose file</button>
         </div>
       </section>
 
-      <section class="panel options-panel" aria-labelledby="options-heading">
-        <div class="panel-head">
-          <h2 id="options-heading">Caption options</h2>
+      <!-- Options -->
+      <section class="glass panel options-panel">
+        <div class="panel-title">
+          <h2>Caption options</h2>
         </div>
 
         <form id="options-form" class="options">
           <label class="field">
-            <span>Language</span>
-            <select id="language" name="language"></select>
+            <span class="label">Language</span>
+            <div class="select-wrap">
+              <select id="language" name="language"></select>
+            </div>
           </label>
 
-          <label class="field">
-            <span>Script</span>
-            <select id="script" name="script">
-              <option value="native">Native script</option>
-              <option value="roman">Roman / Hinglish</option>
-            </select>
-          </label>
+          <div class="field">
+            <span class="label">Script</span>
+            <div id="script-pills" class="segmented" role="radiogroup" aria-label="Script">
+              <button type="button" class="seg active" data-value="native">Native</button>
+              <button type="button" class="seg" data-value="roman">Hinglish / Roman</button>
+            </div>
+            <input type="hidden" id="script" name="script" value="native" />
+          </div>
 
           <label class="field">
-            <span>Style</span>
-            <select id="style" name="style"></select>
+            <span class="label">Style</span>
+            <div class="select-wrap">
+              <select id="style" name="style"></select>
+            </div>
           </label>
 
+          <div class="field">
+            <span class="label">Aspect ratio</span>
+            <div id="aspect-pills" class="segmented wrap" role="radiogroup" aria-label="Aspect">
+              <button type="button" class="seg active" data-value="portrait">Portrait</button>
+              <button type="button" class="seg" data-value="landscape">Landscape</button>
+              <button type="button" class="seg" data-value="square">Square</button>
+              <button type="button" class="seg" data-value="original">Original</button>
+            </div>
+            <input type="hidden" id="aspect" name="aspect" value="portrait" />
+          </div>
+
           <label class="field">
-            <span>Aspect</span>
-            <select id="aspect" name="aspect">
-              <option value="portrait">Portrait</option>
-              <option value="landscape">Landscape</option>
-              <option value="square">Square</option>
-              <option value="original">Original</option>
-            </select>
+            <span class="label">
+              ASR provider
+              <span class="badge">Sarvam + fallback</span>
+            </span>
+            <div class="select-wrap">
+              <select id="provider" name="provider"></select>
+            </div>
+            <p id="provider-hint" class="hint"></p>
           </label>
 
           <fieldset class="field formats">
-            <legend>Output formats</legend>
-            <label><input type="checkbox" name="formats" value="mp4" checked /> MP4</label>
-            <label><input type="checkbox" name="formats" value="srt" /> SRT</label>
-            <label><input type="checkbox" name="formats" value="ass" /> ASS</label>
-            <label><input type="checkbox" name="formats" value="json" /> JSON</label>
+            <legend class="label">Outputs</legend>
+            <div class="format-grid">
+              <label class="check"><input type="checkbox" name="formats" value="mp4" checked /><span>MP4</span></label>
+              <label class="check"><input type="checkbox" name="formats" value="srt" /><span>SRT</span></label>
+              <label class="check"><input type="checkbox" name="formats" value="ass" /><span>ASS</span></label>
+              <label class="check"><input type="checkbox" name="formats" value="json" /><span>JSON</span></label>
+            </div>
           </fieldset>
 
-          <label class="toggle">
+          <label class="switch">
             <input type="checkbox" id="auto-trim" name="autoTrim" />
-            <span>Auto Trim (silence &amp; fillers)</span>
+            <span class="track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <strong>Auto Trim</strong>
+              <small>Cut silence and filler words</small>
+            </span>
           </label>
 
-          <label class="toggle">
+          <label class="switch">
             <input type="checkbox" id="code-switching" name="codeSwitching" />
-            <span>Code-switching (Hinglish / mixed)</span>
+            <span class="track" aria-hidden="true"></span>
+            <span class="switch-copy">
+              <strong>Code-switching</strong>
+              <small>Keep English in Latin for Hinglish</small>
+            </span>
           </label>
 
           <button type="submit" id="btn-generate" class="btn primary" disabled>
-            Generate captions
+            <span>Generate captions</span>
           </button>
         </form>
       </section>
 
-      <section class="panel progress-panel" aria-labelledby="progress-heading">
-        <div class="panel-head">
-          <h2 id="progress-heading">Progress</h2>
-          <span id="job-status" class="status-pill idle">Idle</span>
+      <!-- Progress -->
+      <section class="glass panel progress-panel">
+        <div class="panel-title">
+          <h2>Live progress</h2>
+          <span id="job-status" class="status idle">Idle</span>
         </div>
 
-        <div class="progress-track" aria-hidden="true">
-          <div id="progress-bar" class="progress-bar"></div>
+        <div class="progress-shell">
+          <div class="progress-track">
+            <div id="progress-bar" class="progress-bar"></div>
+          </div>
+          <div class="progress-meta">
+            <p id="progress-label">Waiting for media…</p>
+            <span id="progress-pct">0%</span>
+          </div>
         </div>
-        <p id="progress-label" class="progress-label muted">Waiting for a video…</p>
 
-        <div id="upload-progress" class="upload-progress" hidden>
-          <span>Uploading</span>
+        <div id="upload-progress" class="upload-banner" hidden>
+          <span>Uploading to secure temp job</span>
           <strong id="upload-pct">0%</strong>
         </div>
 
-        <ol id="log" class="log" aria-live="polite"></ol>
+        <details id="log-details" class="terminal" open>
+          <summary>
+            <span>Pipeline log</span>
+            <span class="summary-hint">click to collapse</span>
+          </summary>
+          <ol id="log" class="log" aria-live="polite"></ol>
+        </details>
 
         <div id="downloads" class="downloads" hidden>
-          <h3>Downloads</h3>
-          <div id="download-links" class="download-links"></div>
+          <h3>Your files</h3>
+          <div id="download-links" class="download-grid"></div>
         </div>
       </section>
     </main>
 
     <footer class="foot">
       <p>
-        Files are streamed to a temporary server job and deleted after processing.
-        Nothing is written to <code>localStorage</code>, IndexedDB, or the Cache API.
+        Client privacy: your file stays as an in-memory <code>File</code>. Preview uses
+        <code>URL.createObjectURL</code> and is revoked on clear. No
+        <code>localStorage</code>, IndexedDB, Cache API, or OPFS.
+        Server temps are wiped in <code>try…finally</code> after each job.
       </p>
     </footer>
   </div>

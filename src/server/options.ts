@@ -3,6 +3,12 @@ import { listStylePresets } from '../captions/style.js';
 import type { CliOptions, OutputFormat } from '../cli/args.js';
 import { listLanguages } from '../config/languages.js';
 import { CaptionEngineError } from '../errors.js';
+import {
+  DEFAULT_PROVIDER_MODE,
+  isProviderMode,
+  PROVIDER_MODES,
+  type ProviderMode,
+} from '../asr/index.js';
 
 const ASPECTS: AspectPreset[] = ['portrait', 'landscape', 'square', 'original'];
 const FORMATS: Array<'mp4' | 'srt' | 'ass' | 'json'> = ['mp4', 'srt', 'ass', 'json'];
@@ -15,6 +21,7 @@ export interface JobUiOptions {
   autoTrim?: boolean;
   formats?: string[];
   codeSwitching?: boolean;
+  provider?: ProviderMode;
 }
 
 /** Defaults shared with the CLI's `parseArgs` baseline. */
@@ -89,6 +96,18 @@ function toPipelineFormat(formats: Array<'mp4' | 'srt' | 'ass' | 'json'>): Outpu
   return 'all';
 }
 
+function parseProvider(raw: unknown): ProviderMode {
+  if (typeof raw !== 'string' || !raw.trim()) return DEFAULT_PROVIDER_MODE;
+  const v = raw.trim().toLowerCase();
+  if (!isProviderMode(v)) {
+    throw new CaptionEngineError(
+      `Unknown provider "${v}".`,
+      `Valid: ${PROVIDER_MODES.join(', ')}`,
+    );
+  }
+  return v;
+}
+
 /**
  * Map multipart form fields (or a JSON body) into CliOptions.
  * Returns both the pipeline options and the exact formats the UI requested
@@ -130,6 +149,7 @@ export function uiOptionsToCli(
   const requestedFormats = parseFormats(body.formats ?? body.format);
   const autoTrim = parseBool(body.autoTrim ?? body.auto_trim);
   const codeSwitching = parseBool(body.codeSwitching ?? body.code_switching);
+  const provider = parseProvider(body.provider);
 
   const opts = baseCliOptions({
     input: inputPath,
@@ -142,6 +162,7 @@ export function uiOptionsToCli(
     format: toPipelineFormat(requestedFormats),
     autoTrim,
     codeSwitching,
+    provider,
     // Spaces jobs should not hang waiting for interactive confirmation.
     yes: true,
     verbose: true,
@@ -163,7 +184,34 @@ export function publicMeta() {
     ],
     styles: listStylePresets(),
     aspects: ASPECTS,
-    scripts: ['native', 'roman'] as const,
+    scripts: [
+      { value: 'native', label: 'Native script' },
+      { value: 'roman', label: 'Hinglish / Roman' },
+    ],
     formats: FORMATS,
+    providers: [
+      {
+        value: 'sarvam_fallback_elevenlabs',
+        label: 'Sarvam AI + ElevenLabs Fallback',
+        badge: 'Recommended',
+        description: 'Sarvam first for Indic/Hinglish; ElevenLabs Scribe if Sarvam fails or lacks word timings.',
+      },
+      {
+        value: 'sarvam',
+        label: 'Sarvam AI only',
+        description: 'India-hosted. Chunk-level timings — not enough for word-timed karaoke alone.',
+      },
+      {
+        value: 'elevenlabs',
+        label: 'ElevenLabs Scribe',
+        description: 'Word-level timestamps + strong code-switch handling.',
+      },
+      {
+        value: 'deepgram',
+        label: 'Deepgram Nova',
+        description: 'Word timings; good Telugu/Kannada coverage.',
+      },
+    ],
+    defaultProvider: DEFAULT_PROVIDER_MODE,
   };
 }

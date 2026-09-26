@@ -3,8 +3,8 @@
 
 FROM node:20-bookworm
 
-# System deps: FFmpeg for media, Noto/FreeFont for fallback glyph coverage,
-# plus build tools some native Node addons expect on first install.
+# System deps: ffmpeg package provides both ffmpeg and ffprobe binaries.
+# Noto/FreeFont cover Indic + Latin fallback glyphs for system FONT_DIR.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-freefont-ttf \
@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
+  && ffmpeg -version \
+  && ffprobe -version \
   && rm -rf /var/lib/apt/lists/*
 
 # Hugging Face Spaces runs as uid 1000.
@@ -41,8 +43,11 @@ RUN npm run build \
 ENV NODE_ENV=production
 ENV PORT=7860
 ENV HOST=0.0.0.0
+# Sarvam first, ElevenLabs Scribe on failure / missing word timings.
+ENV ASR_PROVIDER=sarvam_fallback_elevenlabs
 # Extra font dirs on top of assets/fonts/ (system Noto as fallback).
 ENV FONT_DIR=/usr/share/fonts
+ENV MAX_UPLOAD_BYTES=524288000
 
 EXPOSE 7860
 

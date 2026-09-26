@@ -8,7 +8,12 @@ import { CaptionEngineError, InvalidTranscriptError, NoWordTimingsError } from '
 import { probeMedia, assertHasAudio, type MediaInfo } from '../media/probe.js';
 import { extractAudio } from '../media/extract.js';
 import { assertBinary, FFMPEG, FFPROBE } from '../media/ffmpeg.js';
-import { providerFromEnv, assertWordTimings, type AsrProvider } from '../asr/index.js';
+import {
+  resolveProviderChain,
+  transcribeWithFallback,
+  assertWordTimings,
+  DEFAULT_PROVIDER_MODE,
+} from '../asr/index.js';
 import {
   autoTrim, applyTrim, applyHandles, snapCutsToFrames, keepSegments,
   DEFAULT_TRIM_OPTIONS, DEFAULT_CUT_HANDLE_SEC,
@@ -251,7 +256,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   // filename cannot silently reuse the previous take's transcript or cuts.
   const inputFp = await fingerprintInput(inputPath, { durationSec: info.durationSec });
   const trConfig = transcriptConfigHash({
-    provider: opts.provider ?? process.env.ASR_PROVIDER ?? 'elevenlabs',
+    provider: opts.provider ?? process.env.ASR_PROVIDER ?? DEFAULT_PROVIDER_MODE,
     language: opts.language,
     codeSwitching: opts.codeSwitching,
     keyterms: collectKeyterms(opts),
@@ -273,7 +278,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   if (opts.dryRun) {
     log.info('--dry-run: stopping before transcription. Planned work:');
     log.info(`  audio extraction : ${info.hasVideo ? 'yes' : 'yes (re-encode)'}`);
-    log.info(`  provider         : ${opts.provider ?? process.env.ASR_PROVIDER ?? 'elevenlabs'}`);
+    log.info(`  provider         : ${opts.provider ?? process.env.ASR_PROVIDER ?? DEFAULT_PROVIDER_MODE}`);
     log.info(`  language         : ${opts.language ?? 'auto-detect'}`);
     log.info(`  auto trim        : ${opts.autoTrim ? 'yes' : 'no'}`);
     log.info(`  outputs          : ${[
@@ -327,43 +332,58 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     await extractAudio(inputPath, audioPath);
     log.info(`→ ${audioPath}`);
 
-    let provider: AsrProvider;
-    const prevProvider = process.env.ASR_PROVIDER;
-    try {
-      if (opts.provider) process.env.ASR_PROVIDER = opts.provider;
-      provider = providerFromEnv();
-    } finally {
-      if (opts.provider) {
-        if (prevProvider === undefined) delete process.env.ASR_PROVIDER;
-        else process.env.ASR_PROVIDER = prevProvider;
+    const { mode, providers, skipped } = resolveProviderChain(opts.provider);
+    const chainLabel = providers.map((p) => p.name).join(' → ');
+    log.step(
+      providers.length > 1
+        ? `Transcribing with ${chainLabel} (mode: ${mode})`
+        : `Transcribing with ${providers[0]!.name}`,
+    );
+    for (const name of skipped) {
+      log.warn(`Skipping ${name}: API key not set`);
+    }
+    for (const p of providers) {
+      if (!p.supportsWordTimestamps) {
+        log.warn(
+          `${p.name} does not return per-word timestamps` +
+            (providers.length > 1
+              ? ' — will fall back to the next provider if needed.'
+              : '. Word-timed captions will be rejected after transcription.'),
+        );
       }
     }
 
-    log.step(`Transcribing with ${provider.name}`);
-    if (!provider.supportsWordTimestamps) {
-      log.warn(
-        `${provider.name} does not return per-word timestamps. ` +
-          `Word-timed captions will be rejected after transcription.`,
-      );
-    }
     const keyterms = collectKeyterms(opts);
     if (keyterms.length) log.info(`${keyterms.length} keyterm(s) sent to the ASR`);
     if (opts.codeSwitching) {
       log.info('code-switching mode: asking the ASR to keep English in Latin script');
     }
 
-    transcript = await provider.transcribe(readFileSync(audioPath), {
-      language: languageIsAuto ? undefined : opts.language,
-      codeSwitching: opts.codeSwitching,
-      keyterms: keyterms.length ? keyterms : undefined,
-      diarize: false,
-    });
+    transcript = await transcribeWithFallback(
+      providers,
+      readFileSync(audioPath),
+      {
+        language: languageIsAuto ? undefined : opts.language,
+        codeSwitching: opts.codeSwitching,
+        keyterms: keyterms.length ? keyterms : undefined,
+        diarize: false,
+      },
+      {
+        requireWordTimings: true,
+        onFallback: (from, to, reason) => {
+          log.warn(`ASR fallback: ${from} → ${to}. Reason: ${reason}`);
+        },
+      },
+    );
     for (const w of transcript.warnings ?? []) log.warn(w);
     const rawNote =
       transcript.detectedLanguageRaw && transcript.detectedLanguageRaw !== transcript.language
         ? ` (provider returned "${transcript.detectedLanguageRaw}", normalised to ISO-639-1)`
         : '';
-    log.info(`${transcript.words.length} words · detected ${transcript.language}${rawNote}`);
+    log.info(
+      `${transcript.words.length} words · detected ${transcript.language}${rawNote}` +
+        ` · via ${transcript.provider}`,
+    );
   }
 
   try {
