@@ -14,20 +14,22 @@ TypeScript + FFmpeg. CLI locally, or the free **Hugging Face Spaces** web UI (Do
 
 ## Web UI (Hugging Face Spaces)
 
-A browser app ships with this repo for free Docker Spaces deployment:
+FluxoCut-inspired product surface in `public/`:
 
-1. Upload a video (kept as an in-memory `File` in the browser — **no** `localStorage`, IndexedDB, Cache API, or OPFS).
-2. Preview instantly via `URL.createObjectURL` (revoked on clear / replace).
-3. Choose language, script (native / roman), style, aspect, Auto Trim, and output formats.
-4. Watch live progress over Server-Sent Events while the engine extracts audio, transcribes, and renders.
-5. Download captioned MP4 / SRT / ASS / JSON. Server temp files are deleted in `try…finally`.
+| Route | What you get |
+|---|---|
+| `/` | Marketing site — languages, templates, Auto Trim, pricing, plugins, creators |
+| `/app` | Upload workspace (in-memory `File` only — **no** browser storage) |
+| `/app/p/:jobId` | Multi-track editor — cues, templates, Auto Trim restore, export |
+
+Pipeline defaults to **Sarvam AI → ElevenLabs Scribe** fallback. Auto Trim supports Light / Balanced / Strong / Max aggression plus per-cut restore via `PATCH /api/jobs/:id/cuts/:cutId`. Server temps clean up in `try…finally` / job TTL.
 
 ### Run locally
 
 ```bash
 npm install
 npm run fonts:install   # once, if assets/fonts is empty
-# Set ASR keys (see .env.example), e.g. ELEVENLABS_API_KEY
+# Set SARVAM_API_KEY and ELEVENLABS_API_KEY (see .env.example)
 npm run web             # http://0.0.0.0:7860
 ```
 
@@ -35,7 +37,7 @@ npm run web             # http://0.0.0.0:7860
 
 1. Create a new Space → **Docker** SDK.
 2. Push this repository (or connect the GitHub repo).
-3. In Space **Settings → Variables and secrets**, add `SARVAM_API_KEY` and `ELEVENLABS_API_KEY` (default mode is `sarvam_fallback_elevenlabs`: Sarvam first, ElevenLabs when Sarvam fails or lacks word timings). Optional: `DEEPGRAM_API_KEY`, `ASR_PROVIDER`.
+3. In Space **Settings → Variables and secrets**, add `SARVAM_API_KEY` and `ELEVENLABS_API_KEY` (default `ASR_PROVIDER=sarvam_fallback_elevenlabs`). Optional: `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY` (off-topic / visual trim).
 4. The `Dockerfile` installs FFmpeg/ffprobe, fonts, builds TypeScript, and starts `node dist/src/server.js` on port **7860** as user `1000`.
 
 ## CLI
