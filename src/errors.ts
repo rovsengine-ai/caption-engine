@@ -13,12 +13,14 @@ export class CaptionEngineError extends Error {
 }
 
 export class MissingApiKeyError extends CaptionEngineError {
+  /** Stable machine-readable code for the web UI. */
+  readonly code = 'missing_api_key' as const;
+
   constructor(readonly provider: string, envVar: string) {
     super(
-      `No API key for ASR provider "${provider}".`,
-      `Set ${envVar} in your environment or .env file:\n` +
-        `  export ${envVar}="your-key-here"\n` +
-        `Or choose a different provider with --provider <name>.`,
+      'Please provide a Sarvam AI API Key (or ElevenLabs API Key) to transcribe audio.',
+      `Add keys under Account → API Keys, set ${envVar} on the server, ` +
+        `or use Demo / Offline Sample Mode from the editor.`,
     );
   }
 }

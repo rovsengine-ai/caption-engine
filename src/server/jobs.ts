@@ -15,8 +15,9 @@ import type { Reporter, RunResult } from '../cli/run.js';
 import { runPipeline } from '../cli/run.js';
 import type { CliOptions } from '../cli/args.js';
 import type { Cut } from '../types.js';
-import { CaptionEngineError } from '../errors.js';
+import { CaptionEngineError, MissingApiKeyError } from '../errors.js';
 import { loadEnv, redactSecrets } from '../config/env.js';
+import { envWithApiKeys, resolveProviderChain } from '../asr/index.js';
 import { uiOptionsToCli } from './options.js';
 
 loadEnv();
@@ -28,7 +29,7 @@ export type ProgressEvent =
   | { type: 'warn'; message: string }
   | { type: 'progress'; pct: number; message: string }
   | { type: 'done'; message: string; outputs: Record<string, string>; result: JobPublicResult }
-  | { type: 'error'; message: string; hint?: string };
+  | { type: 'error'; message: string; hint?: string; code?: string };
 
 export interface JobPublicResult {
   transcript: RunResult['transcript'];
@@ -259,6 +260,24 @@ export function createJobFromStagedUpload(params: CreateJobParams): { jobId: str
     throw err;
   }
 
+  // Fail fast (before SSE) when ASR keys are missing — unless Demo mode / transcriptIn.
+  if (!opts.demoMode && !opts.transcriptIn) {
+    try {
+      resolveProviderChain(
+        opts.provider,
+        envWithApiKeys(process.env, {
+          sarvamApiKey: opts.sarvamApiKey,
+          elevenlabsApiKey: opts.elevenlabsApiKey,
+          deepgramApiKey: opts.deepgramApiKey,
+        }),
+      );
+    } catch (err) {
+      safeRm(jobDir);
+      if (err instanceof MissingApiKeyError) throw err;
+      throw err;
+    }
+  }
+
   const titleBase = (params.originalName || 'Untitled project').replace(/\.[^.]+$/, '');
   const now = Date.now();
   const job: JobRecord = {
@@ -335,14 +354,25 @@ async function runJob(job: JobRecord, opts: CliOptions): Promise<void> {
   } catch (err) {
     job.status = 'error';
     job.expiresAt = Date.now() + 10 * 60 * 1000;
+    const redactEnv = envWithApiKeys(process.env, {
+      sarvamApiKey: opts.sarvamApiKey,
+      elevenlabsApiKey: opts.elevenlabsApiKey,
+      deepgramApiKey: opts.deepgramApiKey,
+    });
     const message = redactSecrets(
       err instanceof Error ? err.message : String(err),
+      redactEnv,
     );
     const hint = err instanceof CaptionEngineError && err.hint
-      ? redactSecrets(err.hint)
+      ? redactSecrets(err.hint, redactEnv)
       : undefined;
     job.error = message;
-    emit(job, { type: 'error', message, ...(hint ? { hint } : {}) });
+    emit(job, {
+      type: 'error',
+      message,
+      ...(hint ? { hint } : {}),
+      ...(err instanceof MissingApiKeyError ? { code: err.code } : {}),
+    });
   } finally {
     cleanupIntermediates(job);
   }

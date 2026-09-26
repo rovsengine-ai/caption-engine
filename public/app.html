@@ -110,6 +110,7 @@
       </div>
 
       <div class="header-right">
+        <button class="btn btn-ghost btn-sm" id="btn-api-keys" type="button" title="ASR API Keys">API Keys</button>
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
           <span class="knob">🌙</span>
         </button>
@@ -183,11 +184,60 @@
           </div>
 
           <div class="panel-tabbed" data-panel="text">
-            <div class="side-panel-head"><h3>Text</h3><p>Cues built from your transcript. Click any line to seek.</p></div>
-            <div class="side-panel-body">
+            <div class="side-panel-head text-panel-head">
+              <div class="text-head-row">
+                <h3>Text</h3>
+                <div class="switch-row compact">
+                  <span class="switch-copy"><strong>Captions</strong></span>
+                  <label class="switch"><input type="checkbox" id="f-captions-enabled" checked /><span class="knob"></span></label>
+                </div>
+              </div>
+              <p class="text-meta" id="text-meta">No captions yet</p>
+            </div>
+            <div class="side-panel-body text-panel-body">
+              <div class="text-controls">
+                <div class="field stepper-field">
+                  <span class="label">Max words per caption</span>
+                  <div class="stepper" id="max-words-stepper">
+                    <button type="button" class="stepper-btn" id="max-words-dec" aria-label="Decrease">−</button>
+                    <strong id="max-words-value">4</strong>
+                    <button type="button" class="stepper-btn" id="max-words-inc" aria-label="Increase">+</button>
+                  </div>
+                </div>
+
+                <div class="switch-row">
+                  <span class="switch-copy">
+                    <strong>Intelligent captions</strong>
+                    <small>Natural sentence breaks</small>
+                  </span>
+                  <button type="button" class="info-tip" id="intelligent-tip" title="Uses audio prosody and natural semantic clauses for natural sentence breaks." aria-label="About intelligent captions">i</button>
+                  <label class="switch"><input type="checkbox" id="f-intelligent" checked /><span class="knob"></span></label>
+                </div>
+
+                <div class="field">
+                  <span class="label">Caption delay</span>
+                  <div class="segmented delay-scope" id="delay-scope" role="radiogroup" aria-label="Delay scope">
+                    <button type="button" class="seg active" data-value="all">All</button>
+                    <button type="button" class="seg" data-value="selected">Selected</button>
+                  </div>
+                  <div class="range-field delay-range">
+                    <span class="label">Offset <span class="range-value" id="caption-delay-value">0 ms</span></span>
+                    <input type="range" id="caption-delay" min="-1000" max="1000" step="10" value="0" />
+                  </div>
+                </div>
+
+                <div class="text-action-row">
+                  <button type="button" class="btn btn-ghost btn-sm" id="btn-reset-cues">Reset to original</button>
+                  <button type="button" class="btn btn-outline btn-sm" id="btn-regenerate-cues">Regenerate captions</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="btn-select-words">Select words</button>
+                </div>
+              </div>
+
               <div id="cue-list" class="cue-list">
                 <div class="empty-state"><div class="es-ic">📝</div>Generate captions to see cues here.</div>
               </div>
+
+              <button type="button" class="btn btn-primary btn-block" id="btn-generate-layer" disabled>Generate for selected layer</button>
             </div>
           </div>
 
@@ -363,6 +413,29 @@
     <h3>Export your captions</h3>
     <div class="export-chip-grid" id="export-chip-grid"></div>
     <button type="button" class="btn btn-ghost btn-block" id="btn-export-close">Close</button>
+  </div>
+</div>
+
+<!-- API Key Required modal -->
+<div class="apikey-modal" id="apikey-modal" hidden>
+  <div class="apikey-modal-backdrop" data-close-apikey></div>
+  <div class="apikey-modal-card glass" role="dialog" aria-modal="true" aria-labelledby="apikey-modal-title">
+    <header class="apikey-modal-head">
+      <h2 id="apikey-modal-title">API Key Required</h2>
+      <button type="button" class="btn btn-ghost btn-icon" data-close-apikey aria-label="Close">✕</button>
+    </header>
+    <p class="apikey-modal-copy">To generate word-timed captions, enter your Sarvam AI or ElevenLabs API Key.</p>
+    <label class="field key-field">
+      <span class="label">Sarvam AI API Key</span>
+      <input type="password" id="modal-key-sarvam" autocomplete="off" spellcheck="false" placeholder="SARVAM_API_KEY" />
+    </label>
+    <label class="field key-field">
+      <span class="label">ElevenLabs API Key</span>
+      <input type="password" id="modal-key-eleven" autocomplete="off" spellcheck="false" placeholder="ELEVENLABS_API_KEY" />
+    </label>
+    <button type="button" class="btn btn-primary btn-block" id="btn-save-continue-generate">Save &amp; Continue Generating</button>
+    <button type="button" class="btn btn-outline btn-block" id="btn-demo-mode">Demo / Offline Sample Mode</button>
+    <p class="account-footnote">Demo mode uses a bundled sample transcript — no paid ASR call. Keys are stored only in this browser.</p>
   </div>
 </div>
 

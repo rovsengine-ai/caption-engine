@@ -400,9 +400,13 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
   if (err instanceof CaptionEngineError) {
+    const code = 'code' in err && typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : undefined;
     res.status(400).json({
       error: redactSecrets(err.message),
       ...(err.hint ? { hint: redactSecrets(err.hint) } : {}),
+      ...(code ? { code } : {}),
     });
     return;
   }

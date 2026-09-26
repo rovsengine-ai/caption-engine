@@ -72,7 +72,7 @@ describe('ElevenLabs Scribe normaliser', () => {
   test('rejects construction without an API key, naming the env var to set', () => {
     assert.throws(() => new ElevenLabsScribe(''), (err: unknown) => {
       const e = err as Error & { hint?: string };
-      assert.match(e.message, /No API key for ASR provider "elevenlabs"/);
+      assert.match(e.message, /Please provide a Sarvam AI API Key/i);
       assert.match(e.hint ?? '', /ELEVENLABS_API_KEY/, 'hint must name the env var');
       return true;
     });

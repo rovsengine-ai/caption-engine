@@ -46,6 +46,25 @@ function constructProvider(name: ProviderName, env: NodeJS.ProcessEnv): AsrProvi
   }
 }
 
+/** Merge optional per-request web UI keys over process.env (never mutates the base). */
+export function envWithApiKeys(
+  base: NodeJS.ProcessEnv,
+  keys?: {
+    sarvamApiKey?: string;
+    elevenlabsApiKey?: string;
+    deepgramApiKey?: string;
+  },
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  const sarvam = keys?.sarvamApiKey?.trim();
+  const eleven = keys?.elevenlabsApiKey?.trim();
+  const deepgram = keys?.deepgramApiKey?.trim();
+  if (sarvam) env.SARVAM_API_KEY = sarvam;
+  if (eleven) env.ELEVENLABS_API_KEY = eleven;
+  if (deepgram) env.DEEPGRAM_API_KEY = deepgram;
+  return env;
+}
+
 /**
  * Build a single provider from env.
  *
@@ -110,8 +129,9 @@ export function resolveProviderChain(
       if (n === 'elevenlabs') return 'ELEVENLABS_API_KEY';
       return 'DEEPGRAM_API_KEY';
     });
+    // Pass a human label — never surface internal mode ids like sarvam_fallback_elevenlabs.
     throw new MissingApiKeyError(
-      mode,
+      names.length > 1 ? 'sarvam or elevenlabs' : names[0]!,
       needed.join(' or '),
     );
   }
