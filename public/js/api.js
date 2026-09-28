@@ -108,8 +108,51 @@ export async function getTranscript(jobId) {
   return parseJsonOrThrow(res);
 }
 
+/**
+ * Persist in-editor transcript edits.
+ * Body: `{ words }`, `{ cues }`, or `{ wordIndex, text, start?, end? }`.
+ */
+export async function updateTranscript(jobId, body) {
+  const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/transcript`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getCuts(jobId) {
   const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/cuts`);
+  return parseJsonOrThrow(res);
+}
+
+/** Real audio peak envelope for timeline track A1. */
+export async function getWaveform(jobId) {
+  const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/waveform`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getClips(jobId) {
+  const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/clips`);
+  return parseJsonOrThrow(res);
+}
+
+/** Find viral clip candidates (LLM when keyed, else rule-based). */
+export async function generateClips(jobId) {
+  const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/clips/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  return parseJsonOrThrow(res);
+}
+
+/** Export one clip as a captioned 9:16 reel. */
+export async function exportClip(jobId, clipId) {
+  const res = await fetch(
+    `${API_BASE}/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/export`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+  );
   return parseJsonOrThrow(res);
 }
 
@@ -122,6 +165,20 @@ export async function setCutRestored(jobId, cutId, restored) {
       body: JSON.stringify({ restored }),
     },
   );
+  return parseJsonOrThrow(res);
+}
+
+/**
+ * Re-render a finished job from its cached transcript (no ASR).
+ * `options` may include style, aspect, animationTemplate, toneStyle, template.
+ * Progress streams on the existing SSE channel `/api/progress/:jobId`.
+ */
+export async function reRenderJob(jobId, options = {}) {
+  const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/render`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options ?? {}),
+  });
   return parseJsonOrThrow(res);
 }
 

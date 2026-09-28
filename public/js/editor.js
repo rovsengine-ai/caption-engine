@@ -12,8 +12,14 @@ import {
   getJob,
   setProjectTitle as apiSetProjectTitle,
   getTranscript,
+  updateTranscript,
   getCuts,
+  getWaveform,
+  getClips,
+  generateClips,
+  exportClip,
   setCutRestored,
+  reRenderJob,
   sourceUrl,
   downloadUrl,
 } from './api.js';
@@ -50,6 +56,24 @@ const state = {
   pxPerSecond: 42,
   activeCueIndex: -1,
   locked: false, // true once a job has been created — generation inputs freeze
+  /** True when cuts/style/aspect changed since the last finished render. */
+  needsRender: false,
+  /** Distinguishes initial generate SSE vs re-render SSE completion toasts. */
+  renderMode: null, // 'generate' | 'rerender' | null
+  /** Selected cue index for the Cue inspector (-1 = none). */
+  selectedCueIndex: -1,
+  transcriptSaveTimer: null,
+  transcriptSaving: false,
+  clips: [],
+  clipsSource: null,
+  /** When set, playback loops within [start, end). */
+  clipLoop: null,
+  /**
+   * Real audio peaks from GET /waveform:
+   * `{ peaks: number[], durationSec, peaksPerSecond } | null`
+   */
+  waveform: null,
+  waveformLoading: false,
 };
 
 const el = (id) => document.getElementById(id);
@@ -61,6 +85,32 @@ function formatTime(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** Format seconds as MM:SS.mmm for cue boundary fields. */
+function formatCueTime(sec) {
+  if (!Number.isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const rest = sec - m * 60;
+  const s = Math.floor(rest);
+  const ms = Math.round((rest - s) * 1000);
+  const carry = ms === 1000 ? 1 : 0;
+  const ms3 = ms === 1000 ? 0 : ms;
+  return `${String(m).padStart(2, '0')}:${String(s + carry).padStart(2, '0')}.${String(ms3).padStart(3, '0')}`;
+}
+
+/** Parse MM:SS.mmm / M:SS / plain seconds into seconds. */
+function parseCueTime(raw) {
+  const str = String(raw ?? '').trim();
+  if (!str) return NaN;
+  if (/^\d+(\.\d+)?$/.test(str)) return Number(str);
+  const m = str.match(/^(\d+):(\d{1,2})(?:[.,](\d{1,3}))?$/);
+  if (!m) return NaN;
+  const mins = Number(m[1]);
+  const secs = Number(m[2]);
+  const frac = m[3] ? Number(m[3].padEnd(3, '0')) / 1000 : 0;
+  if (secs >= 60) return NaN;
+  return mins * 60 + secs + frac;
 }
 
 function formatFileSize(bytes) {
@@ -220,12 +270,19 @@ function renderTemplateGrid() {
     `;
     btn.title = t.blurb ?? '';
     btn.addEventListener('click', () => {
-      if (state.locked) {
+      if (state.locked && !state.jobId) {
         toast('Template locks in once a project starts. Create a new project to change it.', 'info');
+        return;
+      }
+      if (state.locked && state.jobData?.status === 'running') {
+        toast('Wait for the current render to finish before changing the template.', 'info');
         return;
       }
       state.selectedTemplate = t.id;
       qsa('.template-mini', grid).forEach((b) => b.classList.toggle('active', b === btn));
+      if (state.jobId && state.jobData?.status === 'done') {
+        markNeedsRender('Template changed — re-render to bake it into the video.');
+      }
     });
     grid.appendChild(btn);
   }
@@ -398,8 +455,41 @@ function lockGenerateInputs() {
     if (i.id !== 'btn-clear-file') i.disabled = true;
   });
   el('dropzone').setAttribute('aria-disabled', 'true');
-  el('template-note').textContent = 'Template locked for this project.';
+  el('template-note').textContent = 'Template locked while generating.';
   qsa('.seg', el('aspect-select')).forEach((b) => (b.disabled = true));
+}
+
+/** After a successful generate, unlock style/aspect so the user can re-render. */
+function unlockReRenderControls() {
+  // Keep ASR/language/provider/auto-trim locked — those would require re-transcription.
+  qsa('#template-grid .template-mini').forEach((b) => { b.disabled = false; });
+  qsa('.seg', el('aspect-select')).forEach((b) => (b.disabled = false));
+  el('template-note').textContent =
+    'Change the template or aspect, restore cuts, then use Apply & Render Video — no re-transcription.';
+}
+
+function markNeedsRender(toastMsg) {
+  if (!state.jobId) return;
+  state.needsRender = true;
+  updateRenderStatusUi();
+  if (toastMsg) toast(toastMsg, 'info');
+}
+
+function clearNeedsRender() {
+  state.needsRender = false;
+  updateRenderStatusUi();
+}
+
+function updateRenderStatusUi() {
+  const badge = el('render-status-badge');
+  const applyBtn = el('btn-apply-render');
+  const canRender = Boolean(state.jobId) && state.jobData?.status === 'done';
+  if (badge) badge.hidden = !(canRender && state.needsRender);
+  if (applyBtn) {
+    applyBtn.disabled = !canRender;
+    applyBtn.classList.toggle('btn-primary', state.needsRender && canRender);
+    applyBtn.classList.toggle('btn-outline', !(state.needsRender && canRender));
+  }
 }
 
 async function submitGenerate(e) {
@@ -433,6 +523,7 @@ async function submitGenerate(e) {
       onUploadProgress: (frac) => setProgress(Math.round(frac * 15), 'Uploading your file…'),
     });
     state.jobId = jobId;
+    state.renderMode = 'generate';
     syncProjectMeta({
       id: jobId,
       title: el('project-title')?.value?.trim() || 'Untitled project',
@@ -539,11 +630,23 @@ async function handleProgressEvent(jobId, evt) {
 async function onJobDone(jobId) {
   hideProgressOverlay();
   el('btn-generate').textContent = 'Generated ✓';
-  toast('Captions generated.', 'success');
+  const wasRerender = state.renderMode === 'rerender';
+  state.renderMode = null;
+  if (wasRerender) {
+    toast('Render complete! Updated files ready for export', 'success');
+  } else {
+    toast('Captions generated.', 'success');
+  }
   await refreshJobData(jobId);
   await loadTranscriptAndCuts(jobId);
   ensureVideoSource(jobId);
   el('btn-export').disabled = false;
+  unlockReRenderControls();
+  clearNeedsRender();
+  updateRenderStatusUi();
+  renderExportChips();
+  await loadClips(jobId);
+  await loadWaveform(jobId);
   syncProjectMeta({
     id: jobId,
     title: el('project-title')?.value?.trim() || state.jobData?.projectTitle || 'Untitled project',
@@ -587,12 +690,17 @@ async function hydrateProject(jobId) {
   if (job.status === 'done') {
     hideProgressOverlay();
     el('btn-export').disabled = false;
+    unlockReRenderControls();
+    updateRenderStatusUi();
     await loadTranscriptAndCuts(jobId);
+    await loadClips(jobId);
+    await loadWaveform(jobId);
   } else if (job.status === 'error') {
     showProgressError(job.error || 'Generation failed.');
   } else {
     showProgressOverlay();
     setProgress(50, 'Reconnecting to your project…');
+    state.renderMode = state.renderMode || 'generate';
     subscribeProgress(jobId);
   }
 }
@@ -625,27 +733,34 @@ function ensureVideoSource(jobId) {
 function buildCues(words) {
   const MAX_WORDS = 5;
   const GAP = 0.45;
-  const spoken = (words ?? []).filter((w) => w.type === 'word');
+  const spoken = [];
+  (words ?? []).forEach((w, i) => {
+    if (w.type === 'word') spoken.push({ word: w, index: i });
+  });
   const groups = [];
   let current = null;
-  for (const w of spoken) {
-    const prevEnd = current?.words[current.words.length - 1]?.end;
-    if (current && (w.start - prevEnd >= GAP || current.words.length >= MAX_WORDS)) {
+  for (const entry of spoken) {
+    const prevEnd = current?.entries[current.entries.length - 1]?.word.end;
+    if (current && (entry.word.start - prevEnd >= GAP || current.entries.length >= MAX_WORDS)) {
       groups.push(current);
       current = null;
     }
-    if (!current) current = { words: [] };
-    current.words.push(w);
+    if (!current) current = { entries: [] };
+    current.entries.push(entry);
   }
   if (current) groups.push(current);
 
-  return groups.map((g, i) => ({
-    index: i,
-    start: g.words[0].start,
-    end: g.words[g.words.length - 1].end,
-    words: g.words,
-    text: g.words.map((w) => (state.script === 'roman' && w.roman ? w.roman : w.text)).join(' '),
-  }));
+  return groups.map((g, i) => {
+    const cueWords = g.entries.map((e) => e.word);
+    return {
+      index: i,
+      start: cueWords[0].start,
+      end: cueWords[cueWords.length - 1].end,
+      words: cueWords,
+      wordIndices: g.entries.map((e) => e.index),
+      text: cueWords.map((w) => (state.script === 'roman' && w.roman ? w.roman : w.text)).join(' '),
+    };
+  });
 }
 
 async function loadTranscriptAndCuts(jobId) {
@@ -668,6 +783,8 @@ async function loadTranscriptAndCuts(jobId) {
   renderCueList();
   renderRemovedClips();
   buildTimeline();
+  renderCueInspector();
+  updateClipsUiEnabled();
 }
 
 function renderCueList() {
@@ -679,13 +796,11 @@ function renderCueList() {
   }
   for (const cue of state.cues) {
     const row = document.createElement('div');
-    row.className = 'cue-item';
+    row.className = `cue-item${cue.index === state.selectedCueIndex ? ' is-selected' : ''}`;
     row.setAttribute('data-cue-index', String(cue.index));
     row.innerHTML = `<span class="cue-time">${formatTime(cue.start)}</span><span class="cue-text">${escapeHtml(cue.text)}</span>`;
     row.addEventListener('click', () => {
-      const video = el('preview-video');
-      video.currentTime = cue.start;
-      if (video.paused) video.play().catch(() => {});
+      selectCue(cue.index, { seek: true, play: true });
     });
     list.appendChild(row);
   }
@@ -732,7 +847,11 @@ function renderRemovedClips() {
         cut.restored = nextRestored;
         renderRemovedClips();
         buildTimeline();
-        toast(nextRestored ? 'Cut restored — will be kept in export.' : 'Cut re-applied.', 'success');
+        markNeedsRender(
+          nextRestored
+            ? 'Cut restored — Apply & Render Video to keep it in the export.'
+            : 'Cut re-applied — Apply & Render Video to bake the trim.',
+        );
       } catch (err) {
         toast(err.message || 'Could not update cut.', 'error');
       }
@@ -742,7 +861,7 @@ function renderRemovedClips() {
 }
 
 // ---------------------------------------------------------------------------
-// Bottom timeline — ruler + V1 (cuts) / T1 (cues) / A1 (mock waveform)
+// Bottom timeline — ruler + V1 (cuts) / T1 (cues) / A1 (real waveform)
 // ---------------------------------------------------------------------------
 
 function effectiveDuration() {
@@ -761,6 +880,86 @@ function buildTimelineSegments(duration, cuts) {
   }
   if (cursor < duration) segments.push({ start: cursor, end: duration, cut: false });
   return segments;
+}
+
+/**
+ * Draw real audio peaks onto a canvas sized to `duration * pxPerSecond`.
+ * Active (non-restored) cuts are dimmed with a crosshatch overlay.
+ */
+function renderTrackA1(container, duration, px) {
+  container.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'tl-clip a-clip tl-waveform-wrap';
+  wrap.style.left = '40px';
+  wrap.style.width = `${Math.max(duration * px - 2, 20)}px`;
+
+  const peaks = state.waveform?.peaks;
+  if (!peaks || !peaks.length) {
+    wrap.classList.add(state.waveformLoading ? 'is-loading' : 'is-empty');
+    wrap.textContent = state.waveformLoading ? 'Measuring audio…' : 'No waveform';
+    container.appendChild(wrap);
+    return;
+  }
+
+  const cssW = Math.max(duration * px - 2, 20);
+  const cssH = 36;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const canvas = document.createElement('canvas');
+  canvas.className = 'tl-waveform-canvas';
+  canvas.width = Math.max(1, Math.round(cssW * dpr));
+  canvas.height = Math.max(1, Math.round(cssH * dpr));
+  canvas.style.width = `${cssW}px`;
+  canvas.style.height = `${cssH}px`;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    wrap.textContent = 'No waveform';
+    container.appendChild(wrap);
+    return;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const mid = cssH / 2;
+  const n = peaks.length;
+  const waveDur = state.waveform.durationSec || duration;
+  // Map each peak index → x via true time so zoom only changes px/sec, not bar density math.
+  const barW = Math.max(1, (cssW / Math.max(n, 1)) * 0.85);
+
+  ctx.fillStyle = 'rgba(94, 234, 212, 0.55)';
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * waveDur;
+    const x = (t / Math.max(duration, 0.001)) * cssW;
+    const amp = peaks[i] ?? 0;
+    const h = Math.max(1, amp * (cssH * 0.9));
+    ctx.fillRect(x, mid - h / 2, barW, h);
+  }
+
+  // Dim + crosshatch regions under active cuts.
+  const cutSegs = buildTimelineSegments(duration, state.cuts).filter((s) => s.cut);
+  if (cutSegs.length) {
+    for (const seg of cutSegs) {
+      const x0 = (seg.start / Math.max(duration, 0.001)) * cssW;
+      const x1 = (seg.end / Math.max(duration, 0.001)) * cssW;
+      const w = Math.max(x1 - x0, 1);
+      ctx.fillStyle = 'rgba(8, 12, 18, 0.55)';
+      ctx.fillRect(x0, 0, w, cssH);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0, 0, w, cssH);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = x0 - cssH; x < x1 + cssH; x += 6) {
+        ctx.moveTo(x, cssH);
+        ctx.lineTo(x + cssH, 0);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  wrap.appendChild(canvas);
+  container.appendChild(wrap);
 }
 
 function buildTimeline() {
@@ -799,33 +998,20 @@ function buildTimeline() {
   t1.innerHTML = '';
   for (const cue of state.cues) {
     const clip = document.createElement('div');
-    clip.className = 't-clip tl-clip';
+    clip.className = `t-clip tl-clip${cue.index === state.selectedCueIndex ? ' is-selected' : ''}`;
     clip.style.left = `${40 + cue.start * px}px`;
     clip.style.width = `${Math.max((cue.end - cue.start) * px - 2, 24)}px`;
     clip.textContent = cue.text;
     clip.title = cue.text;
     clip.setAttribute('data-cue-index', String(cue.index));
-    clip.addEventListener('click', () => { el('preview-video').currentTime = cue.start; });
+    clip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectCue(cue.index, { seek: true, play: false });
+    });
     t1.appendChild(clip);
   }
 
-  // A1 — decorative mock waveform (deterministic pseudo-random bars)
-  const a1 = el('track-a1');
-  a1.innerHTML = '';
-  const wf = document.createElement('div');
-  wf.className = 'tl-clip a-clip';
-  wf.style.left = '40px';
-  wf.style.width = `${Math.max(duration * px - 2, 20)}px`;
-  const bars = Math.max(20, Math.floor(duration * 3));
-  for (let i = 0; i < bars; i++) {
-    const bar = document.createElement('div');
-    bar.className = 'a-bar';
-    const seed = Math.sin(i * 12.9898) * 43758.5453;
-    const h = 20 + (Math.abs(seed % 1) * 70);
-    bar.style.height = `${h}%`;
-    wf.appendChild(bar);
-  }
-  a1.appendChild(wf);
+  renderTrackA1(el('track-a1'), duration, px);
 
   // Seeking by clicking the ruler/tracks
   const inner2 = inner;
@@ -836,6 +1022,21 @@ function buildTimeline() {
     const t = Math.max(0, x / px);
     el('preview-video').currentTime = t;
   };
+}
+
+async function loadWaveform(jobId) {
+  if (!jobId) return;
+  state.waveformLoading = true;
+  buildTimeline();
+  try {
+    const data = await getWaveform(jobId);
+    state.waveform = data && Array.isArray(data.peaks) ? data : null;
+  } catch {
+    state.waveform = null;
+  } finally {
+    state.waveformLoading = false;
+    buildTimeline();
+  }
 }
 
 function updatePlayhead(t) {
@@ -908,6 +1109,15 @@ function maybeSkipCut(t) {
   }
 }
 
+function maybeLoopClip(t) {
+  if (!state.clipLoop) return;
+  const { start, end } = state.clipLoop;
+  const video = el('preview-video');
+  if (t >= end - 0.04) {
+    video.currentTime = start;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Transport (play/pause, scrub, time label) + video event wiring
 // ---------------------------------------------------------------------------
@@ -939,6 +1149,7 @@ function initTransport() {
     updatePlayhead(t);
     updateCaptionOverlay(t);
     maybeSkipCut(t);
+    maybeLoopClip(t);
   });
 
   function seekFromEvent(e) {
@@ -981,7 +1192,10 @@ function initAspectSelect() {
     state.aspect = value;
     el('phone-frame')?.setAttribute('data-aspect', value);
     if (state.jobId) syncProjectMeta({ aspect: value });
-  }, { lockable: true });
+    if (state.jobId && state.jobData?.status === 'done') {
+      markNeedsRender('Aspect changed — re-render to update the exported video.');
+    }
+  }, { lockable: false });
 }
 
 // ---------------------------------------------------------------------------
@@ -995,6 +1209,8 @@ function initScriptPills() {
       state.cues = buildCues(state.transcript?.words ?? []);
       renderCueList();
       buildTimeline();
+      if (state.selectedCueIndex >= 0) renderCueInspector();
+      refreshLivePreview();
     }
   }, { lockable: true });
 }
@@ -1033,6 +1249,427 @@ function initCaptionStyleControls() {
   el('fx-uppercase').addEventListener('change', (e) => overlay.classList.toggle('uppercase', e.target.checked));
   el('fx-glow').addEventListener('change', (e) => overlay.classList.toggle('glow', e.target.checked));
   el('fx-boxed').addEventListener('change', (e) => overlay.classList.toggle('boxed', e.target.checked));
+}
+
+// ---------------------------------------------------------------------------
+// Cue inspector — edit cue text, boundaries, and per-word spelling
+// ---------------------------------------------------------------------------
+
+function switchInspectorTab(key) {
+  qsa('[data-inspector-tab]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-inspector-tab') === key));
+  qsa('.inspector-tabpanel').forEach((p) => p.classList.toggle('active', p.getAttribute('data-inspector-panel') === key));
+}
+
+function selectCue(index, { seek = false, play = false } = {}) {
+  if (!Number.isInteger(index) || index < 0 || index >= state.cues.length) {
+    clearCueSelection();
+    return;
+  }
+  state.selectedCueIndex = index;
+  const cue = state.cues[index];
+  renderCueList();
+  buildTimeline();
+  renderCueInspector();
+  switchInspectorTab('cue');
+
+  const video = el('preview-video');
+  if (seek && cue) {
+    video.currentTime = cue.start;
+    if (play) video.play().catch(() => {});
+  }
+  // Force overlay refresh for the selected cue
+  state.activeCueIndex = -1;
+  updateCaptionOverlay(video.currentTime || cue.start);
+}
+
+function clearCueSelection() {
+  state.selectedCueIndex = -1;
+  renderCueList();
+  buildTimeline();
+  renderCueInspector();
+}
+
+function displayWordText(w) {
+  return state.script === 'roman' && w.roman ? w.roman : w.text;
+}
+
+function renderCueInspector() {
+  const empty = el('cue-inspector-empty');
+  const panel = el('cue-inspector');
+  if (!empty || !panel) return;
+
+  const cue = state.cues[state.selectedCueIndex];
+  if (!cue) {
+    empty.hidden = false;
+    panel.hidden = true;
+    return;
+  }
+
+  empty.hidden = true;
+  panel.hidden = false;
+  el('cue-inspector-label').textContent = `Cue ${cue.index + 1}`;
+  el('cue-text-edit').value = cue.text;
+  el('cue-start-edit').value = formatCueTime(cue.start);
+  el('cue-end-edit').value = formatCueTime(cue.end);
+  renderCueWordChips(cue);
+}
+
+function renderCueWordChips(cue) {
+  const box = el('cue-word-chips');
+  if (!box) return;
+  box.innerHTML = '';
+  cue.wordIndices.forEach((wi, localIdx) => {
+    const w = state.transcript?.words?.[wi];
+    if (!w) return;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'cue-word-chip';
+    chip.textContent = displayWordText(w);
+    chip.title = `Word ${wi} · ${formatCueTime(w.start)}–${formatCueTime(w.end)}`;
+    chip.addEventListener('click', () => beginWordChipEdit(chip, wi, localIdx));
+    box.appendChild(chip);
+  });
+}
+
+function beginWordChipEdit(chip, wordIndex) {
+  const w = state.transcript?.words?.[wordIndex];
+  if (!w) return;
+  chip.classList.add('is-editing');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = displayWordText(w);
+  input.setAttribute('aria-label', 'Edit word');
+  chip.textContent = '';
+  chip.appendChild(input);
+  input.focus();
+  input.select();
+
+  const commit = async () => {
+    const next = input.value;
+    chip.classList.remove('is-editing');
+    if (next === displayWordText(w)) {
+      chip.textContent = displayWordText(w);
+      return;
+    }
+    // Optimistic local update for live preview
+    if (state.script === 'roman' && w.roman !== undefined) {
+      w.roman = next;
+    } else {
+      w.text = next;
+      if (w.roman !== undefined) w.roman = next;
+    }
+    rebuildCuesFromTranscript();
+    const cueIdx = state.cues.findIndex((c) => c.wordIndices.includes(wordIndex));
+    if (cueIdx >= 0) state.selectedCueIndex = cueIdx;
+    renderCueInspector();
+    refreshLivePreview();
+    scheduleTranscriptSave({ wordIndex, text: next, start: w.start, end: w.end });
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      chip.classList.remove('is-editing');
+      chip.textContent = displayWordText(w);
+    }
+  });
+  input.addEventListener('blur', () => { commit().catch(() => {}); });
+}
+
+function rebuildCuesFromTranscript() {
+  state.cues = buildCues(state.transcript?.words ?? []);
+  // Keep selection if still valid
+  if (state.selectedCueIndex >= state.cues.length) state.selectedCueIndex = -1;
+  renderCueList();
+  buildTimeline();
+}
+
+function refreshLivePreview() {
+  const video = el('preview-video');
+  state.activeCueIndex = -1;
+  updateCaptionOverlay(video?.currentTime || 0);
+}
+
+function applyCueFormToLocalState() {
+  const cue = state.cues[state.selectedCueIndex];
+  if (!cue || !state.transcript?.words) return null;
+
+  const text = el('cue-text-edit').value;
+  const start = parseCueTime(el('cue-start-edit').value);
+  const end = parseCueTime(el('cue-end-edit').value);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+    toast('Cue times must be valid and start ≤ end (MM:SS.mmm).', 'error');
+    return null;
+  }
+
+  const wordsPayload = cue.wordIndices.map((wi) => {
+    const w = state.transcript.words[wi];
+    return {
+      wordIndex: wi,
+      text: displayWordText(w),
+      start: w.start,
+      end: w.end,
+      ...(w.roman !== undefined ? { roman: w.roman } : {}),
+    };
+  });
+
+  return {
+    index: cue.index,
+    start,
+    end,
+    text,
+    wordIndices: [...cue.wordIndices],
+    words: wordsPayload,
+  };
+}
+
+function scheduleTranscriptSave(singleWordPatch = null) {
+  if (!state.jobId) return;
+  clearTimeout(state.transcriptSaveTimer);
+  state.transcriptSaveTimer = setTimeout(() => {
+    persistTranscriptEdits(singleWordPatch).catch((err) => {
+      toast(err.message || 'Could not save transcript.', 'error');
+    });
+  }, 600);
+}
+
+async function persistTranscriptEdits(singleWordPatch = null) {
+  if (!state.jobId || state.transcriptSaving) return;
+  state.transcriptSaving = true;
+  try {
+    let body;
+    if (singleWordPatch && Number.isInteger(singleWordPatch.wordIndex)) {
+      body = singleWordPatch;
+    } else {
+      const cuePatch = applyCueFormToLocalState();
+      if (!cuePatch) return;
+      body = { cues: [cuePatch] };
+    }
+
+    await updateTranscript(state.jobId, body);
+
+    // Refresh from server so timings/romanisation stay canonical.
+    state.transcript = await getTranscript(state.jobId);
+    rebuildCuesFromTranscript();
+    if (state.selectedCueIndex >= 0) renderCueInspector();
+    refreshLivePreview();
+    markNeedsRender();
+    showTranscriptSavedBadge();
+    toast('Transcript saved', 'success');
+  } finally {
+    state.transcriptSaving = false;
+  }
+}
+
+function showTranscriptSavedBadge() {
+  const badge = el('cue-save-badge');
+  if (!badge) return;
+  badge.hidden = false;
+  clearTimeout(showTranscriptSavedBadge._t);
+  showTranscriptSavedBadge._t = setTimeout(() => { badge.hidden = true; }, 1800);
+}
+
+function initCueInspector() {
+  el('cue-text-edit')?.addEventListener('input', () => {
+    const cue = state.cues[state.selectedCueIndex];
+    if (!cue) return;
+    cue.text = el('cue-text-edit').value;
+    // Optimistic redistribute for overlay
+    const tokens = cue.text.trim().split(/\s+/).filter(Boolean);
+    const idxs = cue.wordIndices;
+    if (tokens.length && idxs.length) {
+      for (let i = 0; i < idxs.length; i++) {
+        const wi = idxs[i];
+        const w = state.transcript?.words?.[wi];
+        if (!w) continue;
+        const assigned = i < idxs.length - 1
+          ? (tokens[i] ?? '')
+          : tokens.slice(i).join(' ') || (tokens[i] ?? '');
+        if (state.script === 'roman' && w.roman !== undefined) w.roman = assigned;
+        else {
+          w.text = assigned;
+          if (w.roman !== undefined) w.roman = assigned;
+        }
+      }
+    }
+    renderCueList();
+    buildTimeline();
+    refreshLivePreview();
+    scheduleTranscriptSave();
+  });
+
+  const onTimeBlur = () => {
+    if (state.selectedCueIndex < 0) return;
+    scheduleTranscriptSave();
+  };
+  el('cue-start-edit')?.addEventListener('change', onTimeBlur);
+  el('cue-end-edit')?.addEventListener('change', onTimeBlur);
+  el('cue-start-edit')?.addEventListener('blur', onTimeBlur);
+  el('cue-end-edit')?.addEventListener('blur', onTimeBlur);
+
+  el('btn-save-transcript')?.addEventListener('click', () => {
+    clearTimeout(state.transcriptSaveTimer);
+    persistTranscriptEdits().catch((err) => toast(err.message || 'Could not save transcript.', 'error'));
+  });
+  el('btn-clear-cue-selection')?.addEventListener('click', () => clearCueSelection());
+}
+
+// ---------------------------------------------------------------------------
+// Viral clips panel
+// ---------------------------------------------------------------------------
+
+function formatClipRange(start, end) {
+  return `${formatTime(start)} – ${formatTime(end)}`;
+}
+
+function updateClipsUiEnabled() {
+  const btn = el('btn-find-clips');
+  const ready = Boolean(state.jobId) && state.jobData?.status === 'done' && Boolean(state.transcript);
+  if (btn) btn.disabled = !ready;
+  if (el('clips-hint') && ready && !state.clips.length) {
+    el('clips-hint').textContent = 'Scan the transcript for self-contained moments worth clipping.';
+  }
+}
+
+function renderClipsList() {
+  const list = el('clips-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const badge = el('clips-source-badge');
+  if (badge) {
+    if (state.clipsSource) {
+      badge.hidden = false;
+      badge.textContent = state.clipsSource === 'llm'
+        ? 'Scored with Vision LLM'
+        : 'Rule-based scores (no LLM key)';
+    } else {
+      badge.hidden = true;
+    }
+  }
+
+  if (!state.clips.length) {
+    list.innerHTML = '<div class="empty-state"><div class="es-ic">⚡</div>No clips yet.</div>';
+    return;
+  }
+
+  for (const clip of state.clips) {
+    const card = document.createElement('div');
+    const looping = state.clipLoop && Math.abs(state.clipLoop.start - clip.start) < 0.01
+      && Math.abs(state.clipLoop.end - clip.end) < 0.01;
+    card.className = `clip-card${looping ? ' is-looping' : ''}`;
+    card.setAttribute('data-clip-id', clip.id);
+    const dur = Math.round(clip.durationSec || (clip.end - clip.start));
+    card.innerHTML = `
+      <div class="clip-card-top">
+        <strong>${escapeHtml(clip.hook || clip.title)}</strong>
+        <span class="clip-score">Score: ${Math.round(clip.viralityScore)}/100</span>
+      </div>
+      <div class="clip-meta">${dur}s · ${formatClipRange(clip.start, clip.end)}</div>
+      ${clip.reasoning ? `<div class="clip-reason">${escapeHtml(clip.reasoning)}</div>` : ''}
+      <div class="clip-actions">
+        <button type="button" class="btn btn-outline btn-sm" data-clip-preview>Preview on Timeline</button>
+        <button type="button" class="btn btn-primary btn-sm" data-clip-export>Export Reel (9:16)</button>
+        ${clip.downloadUrl
+          ? `<a class="btn btn-ghost btn-sm" data-clip-download href="${escapeHtml(clip.downloadUrl)}" download>Download</a>`
+          : ''}
+      </div>
+    `;
+    qs('[data-clip-preview]', card)?.addEventListener('click', () => previewClipOnTimeline(clip));
+    qs('[data-clip-export]', card)?.addEventListener('click', (e) => {
+      exportClipReel(clip, e.currentTarget).catch((err) => {
+        toast(err.message || 'Clip export failed.', 'error');
+      });
+    });
+    list.appendChild(card);
+  }
+}
+
+function previewClipOnTimeline(clip) {
+  state.clipLoop = { start: clip.start, end: clip.end };
+  const video = el('preview-video');
+  video.currentTime = clip.start;
+  video.play().catch(() => {});
+  renderClipsList();
+  toast(`Looping ${formatClipRange(clip.start, clip.end)} — click Preview again on another clip to switch.`, 'info');
+}
+
+async function exportClipReel(clip, btn) {
+  if (!state.jobId) return;
+  const label = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Exporting…';
+  }
+  try {
+    const res = await exportClip(state.jobId, clip.id);
+    clip.exported = true;
+    clip.downloadUrl = res.downloadUrl;
+    renderClipsList();
+    toast('Reel ready — download started.', 'success');
+    if (res.downloadUrl) {
+      const a = document.createElement('a');
+      a.href = res.downloadUrl;
+      a.setAttribute('download', '');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label || 'Export Reel (9:16)';
+    }
+  }
+}
+
+async function loadClips(jobId) {
+  try {
+    const res = await getClips(jobId);
+    state.clips = res.clips ?? [];
+  } catch {
+    state.clips = [];
+  }
+  renderClipsList();
+  updateClipsUiEnabled();
+}
+
+async function findViralClips() {
+  if (!state.jobId) return;
+  const btn = el('btn-find-clips');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Finding clips…';
+  }
+  const hint = el('clips-hint');
+  if (hint) hint.textContent = 'Scoring moments in your transcript…';
+  try {
+    const res = await generateClips(state.jobId);
+    state.clips = res.clips ?? [];
+    state.clipsSource = res.source ?? null;
+    renderClipsList();
+    if (hint) {
+      hint.textContent = state.clips.length
+        ? `${state.clips.length} candidate${state.clips.length === 1 ? '' : 's'} — preview, then export as 9:16.`
+        : 'No strong clip candidates found. Try a longer video or LLM scoring with ANTHROPIC_API_KEY.';
+    }
+    toast(state.clips.length ? `Found ${state.clips.length} clip(s).` : 'No clips found.', 'success');
+  } catch (err) {
+    toast(err.message || 'Could not find clips.', 'error');
+    if (hint) hint.textContent = 'Clip finding failed — try again.';
+  } finally {
+    if (btn) {
+      btn.textContent = 'Find viral clips';
+      updateClipsUiEnabled();
+    }
+  }
+}
+
+function initClipsPanel() {
+  el('btn-find-clips')?.addEventListener('click', () => {
+    findViralClips().catch((err) => toast(err.message || 'Could not find clips.', 'error'));
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,6 +1721,50 @@ function initExportPanel() {
   });
 }
 
+async function applyAndRender() {
+  if (!state.jobId) return;
+  if (state.jobData?.status === 'running' || state.jobData?.status === 'queued') {
+    toast('A render is already in progress.', 'info');
+    return;
+  }
+  if (state.jobData?.status !== 'done') {
+    toast('Generate captions first before re-rendering.', 'error');
+    return;
+  }
+
+  const applyBtn = el('btn-apply-render');
+  if (applyBtn) applyBtn.disabled = true;
+
+  showProgressOverlay();
+  setProgress(0, 'Starting re-render from cached transcript…');
+  el('po-log').innerHTML = '';
+  appendLog('Re-render — ASR skipped (using cached transcript)');
+
+  try {
+    state.renderMode = 'rerender';
+    if (state.jobData) state.jobData.status = 'running';
+    updateRenderStatusUi();
+    syncProjectMeta({ status: 'running' });
+
+    await reRenderJob(state.jobId, {
+      template: state.selectedTemplate || undefined,
+      aspect: state.aspect || undefined,
+    });
+    subscribeProgress(state.jobId);
+  } catch (err) {
+    state.renderMode = null;
+    if (state.jobData) state.jobData.status = 'done';
+    updateRenderStatusUi();
+    showProgressError(err.message || 'Re-render failed.', err.hint);
+  }
+}
+
+function initApplyRenderButton() {
+  el('btn-apply-render')?.addEventListener('click', () => {
+    applyAndRender().catch((err) => toast(err.message || 'Re-render failed.', 'error'));
+  });
+}
+
 function renderExportChips() {
   const grid = el('export-chip-grid');
   grid.innerHTML = '';
@@ -1130,6 +1811,18 @@ function resetForNewProject() {
   state.jobData = null;
   state.locked = false;
   state.duration = 0;
+  state.needsRender = false;
+  state.renderMode = null;
+  state.selectedCueIndex = -1;
+  state.clips = [];
+  state.clipsSource = null;
+  state.clipLoop = null;
+  state.waveform = null;
+  state.waveformLoading = false;
+  if (state.transcriptSaveTimer) {
+    clearTimeout(state.transcriptSaveTimer);
+    state.transcriptSaveTimer = null;
+  }
   resetPreviewOnly();
 
   const video = el('preview-video');
@@ -1144,12 +1837,17 @@ function resetForNewProject() {
   el('generate-hint').textContent = 'Choose a file to get started.';
   el('project-title').value = 'Untitled project';
   el('btn-export').disabled = true;
+  if (el('btn-apply-render')) el('btn-apply-render').disabled = true;
+  if (el('render-status-badge')) el('render-status-badge').hidden = true;
   hideProgressOverlay();
   renderCueList();
   el('trim-results').hidden = true;
   clearTimelineTracks();
+  renderClipsList();
+  updateClipsUiEnabled();
 
   qsa('#generate-form input, #generate-form select').forEach((i) => { i.disabled = false; });
+  qsa('#template-grid .template-mini').forEach((b) => { b.disabled = false; });
   qsa('.seg', el('aspect-select')).forEach((b) => (b.disabled = false));
   el('template-note').textContent = 'Pick a look before you generate — the template locks in once rendering starts.';
 }
@@ -1202,8 +1900,11 @@ export async function initEditor(opts = {}) {
   initTransport();
   initAutoTrimSwitch();
   initCaptionStyleControls();
+  initCueInspector();
+  initClipsPanel();
   initTitleEditing();
   initExportPanel();
+  initApplyRenderButton();
   initRetryButton();
   initHomeButton();
 

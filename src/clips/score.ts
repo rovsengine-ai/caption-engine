@@ -200,6 +200,101 @@ export async function findClips(
     .slice(0, opts.maxCandidates);
 }
 
+/**
+ * Rule-based clip finder — used when no LLM API key is available.
+ *
+ * Scans the transcript for self-contained windows between natural pauses,
+ * scores them with lightweight heuristics (hooks, questions, density), and
+ * returns the top candidates. Not a substitute for LLM scoring, but far
+ * better than an empty list when ANTHROPIC_API_KEY is unset.
+ */
+export function scoreTranscriptSegments(
+  transcript: Transcript,
+  options: Partial<ClipFinderOptions> = {},
+): ClipCandidate[] {
+  const opts = { ...DEFAULT_CLIP_OPTIONS, ...options };
+  const words = transcript.words.filter((w) => w.type === 'word' && w.keep !== false);
+  if (words.length < 8) return [];
+
+  const HOOK_RE =
+    /\b(how|why|secret|tip|never|always|mistake|truth|hack|learn|stop|start|best|worst|must|should|don't|dont|matlab|kaise|kyun|raaz|galati)\b/i;
+  const QUESTION_RE = /[?？؟]$/;
+  const EXCLAIM_RE = /[!！]$/;
+  const SENTENCE_END = /[.!?।॥؟]$/;
+
+  // Candidate windows: start at sentence boundaries / long gaps, grow until
+  // duration hits max, then score.
+  const starts: number[] = [0];
+  for (let i = 1; i < words.length; i++) {
+    const prev = words[i - 1]!;
+    const cur = words[i]!;
+    const gap = cur.start - prev.end;
+    if (gap >= 0.55 || SENTENCE_END.test(prev.text.trim())) starts.push(i);
+  }
+
+  const cands: ClipCandidate[] = [];
+  for (const si of starts) {
+    const a = words[si]!;
+    // Find the furthest end index still within maxDuration.
+    let bi = si;
+    for (let j = si; j < words.length; j++) {
+      if (words[j]!.end - a.start > opts.maxDurationSec) break;
+      bi = j;
+    }
+    const b = words[bi]!;
+    const dur = b.end - a.start;
+    if (dur < opts.minDurationSec) continue;
+
+    // Prefer ending on a sentence boundary when possible.
+    let endIdx = bi;
+    for (let j = bi; j > si; j--) {
+      if (SENTENCE_END.test(words[j]!.text.trim())) {
+        if (words[j]!.end - a.start >= opts.minDurationSec) {
+          endIdx = j;
+          break;
+        }
+      }
+    }
+    const endWord = words[endIdx]!;
+    const slice = words.slice(si, endIdx + 1);
+    const text = slice.map((w) => w.text).join(' ');
+    const lower = text.toLowerCase();
+
+    let score = 40;
+    if (HOOK_RE.test(lower)) score += 18;
+    if (slice.some((w) => QUESTION_RE.test(w.text))) score += 14;
+    if (slice.some((w) => EXCLAIM_RE.test(w.text))) score += 6;
+    // Prefer mid-length clips (~30–55s).
+    const ideal = 40;
+    score += Math.max(0, 12 - Math.abs((endWord.end - a.start) - ideal) / 4);
+    // Density: denser speech tends to hold attention better than sparse.
+    const density = slice.length / Math.max(endWord.end - a.start, 1);
+    if (density > 2.2) score += 8;
+    if (density < 1.0) score -= 8;
+    // Opening after a pause is a natural hook point.
+    if (si > 0 && a.start - words[si - 1]!.end >= 0.7) score += 6;
+
+    const title = slice
+      .slice(0, 8)
+      .map((w) => w.text)
+      .join(' ')
+      .slice(0, 80) || 'Untitled clip';
+
+    cands.push({
+      start: a.start,
+      end: endWord.end,
+      score: clampScore(score),
+      title,
+      reason: 'Rule-based candidate (no LLM key) — review before exporting.',
+      transcriptExcerpt: text.slice(0, 600),
+    });
+  }
+
+  return dedupeCandidates(cands)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, opts.maxCandidates);
+}
+
 function clampScore(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.min(100, Math.max(0, Math.round(n)));

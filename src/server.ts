@@ -16,15 +16,22 @@ import { loadEnv, redactSecrets } from './config/env.js';
 import {
   createJobFromStagedUpload,
   destroyJob,
+  exportJobClip,
+  generateJobClips,
   getJob,
+  getJobWaveform,
+  listJobClips,
   listJobCuts,
   readJobTranscript,
   setCutRestored,
   setProjectTitle,
+  startReRender,
+  updateJobTranscript,
   subscribe,
   unsubscribe,
   uploadsStagingDir,
   type ProgressEvent,
+  type UpdateTranscriptBody,
 } from './server/jobs.js';
 import { publicMeta } from './server/options.js';
 
@@ -99,7 +106,7 @@ app.use((req, res, next) => {
   } else {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Requested-With',
@@ -264,6 +271,42 @@ app.patch('/api/jobs/:jobId/cuts/:cutId', (req: Request, res: Response) => {
   res.json({ cut, message: restored ? 'Cut restored (will be kept in export)' : 'Cut re-applied' });
 });
 
+/**
+ * Re-render from the cached transcript — never calls ASR.
+ * Streams progress on the existing SSE channel `/api/progress/:jobId`.
+ */
+app.post('/api/jobs/:jobId/render', (req: Request, res: Response, next: NextFunction) => {
+  const jobId = param(req.params.jobId);
+  const job = getJob(jobId);
+  if (!job) {
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
+  if (job.status === 'running' || job.status === 'queued') {
+    res.status(409).json({ error: 'Job is already rendering', status: job.status });
+    return;
+  }
+
+  try {
+    const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
+    const started = startReRender(jobId, {
+      style: typeof body.style === 'string' ? body.style : undefined,
+      aspect: typeof body.aspect === 'string' ? body.aspect : undefined,
+      animationTemplate: typeof body.animationTemplate === 'string' ? body.animationTemplate : undefined,
+      toneStyle: typeof body.toneStyle === 'string' ? body.toneStyle : undefined,
+      template: typeof body.template === 'string' ? body.template : undefined,
+    });
+    res.status(202).json({
+      ok: true,
+      jobId: started.jobId,
+      progressUrl: `/api/progress/${started.jobId}`,
+      outputs: started.outputs,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/api/jobs/:jobId/transcript', (req: Request, res: Response) => {
   const doc = readJobTranscript(param(req.params.jobId));
   if (!doc) {
@@ -271,6 +314,82 @@ app.get('/api/jobs/:jobId/transcript', (req: Request, res: Response) => {
     return;
   }
   res.json(doc);
+});
+
+/**
+ * Audio peak envelope for timeline track A1.
+ * Cached on disk after the first computation (`work/waveform.json`).
+ */
+app.get('/api/jobs/:jobId/waveform', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const waveform = await getJobWaveform(param(req.params.jobId));
+    res.json(waveform);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** List viral clip candidates for a job (empty array until generated). */
+app.get('/api/jobs/:jobId/clips', (req: Request, res: Response) => {
+  const clips = listJobClips(param(req.params.jobId));
+  if (!clips) {
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
+  res.json({ clips, count: clips.length });
+});
+
+/**
+ * Find viral clip candidates from the cached transcript.
+ * Uses Anthropic when ANTHROPIC_API_KEY is set; otherwise rule-based scoring.
+ */
+app.post('/api/jobs/:jobId/clips/generate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await generateJobClips(param(req.params.jobId));
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Export one clip as a captioned 9:16 reel.
+ * Burns captions for the clip window via chunked rendering (no ASR).
+ */
+app.post('/api/jobs/:jobId/clips/:clipId/export', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await exportJobClip(param(req.params.jobId), param(req.params.clipId));
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * In-editor transcript edits — updates cached transcript.json and rebuilds
+ * SRT/ASS. Never calls ASR. Burned-in MP4 requires a separate re-render.
+ */
+app.patch('/api/jobs/:jobId/transcript', (req: Request, res: Response, next: NextFunction) => {
+  const jobId = param(req.params.jobId);
+  const job = getJob(jobId);
+  if (!job) {
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
+  if (job.status === 'running' || job.status === 'queued') {
+    res.status(409).json({ error: 'Job is currently rendering', status: job.status });
+    return;
+  }
+
+  try {
+    const body = (req.body && typeof req.body === 'object')
+      ? req.body as UpdateTranscriptBody
+      : {} as UpdateTranscriptBody;
+    const result = updateJobTranscript(jobId, body);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /** Stream the original upload for the editor canvas (ephemeral server tmp). */
@@ -325,8 +444,11 @@ function sendDownload(req: Request, res: Response, headOnly: boolean): void {
   }
 
   const size = statSync(filePath).size;
-  const type = DOWNLOAD_TYPES[format] ?? 'application/octet-stream';
-  let downloadName = `captioned.${format}`;
+  const isClip = format.startsWith('clip-');
+  const type = isClip
+    ? 'video/mp4'
+    : (DOWNLOAD_TYPES[format] ?? 'application/octet-stream');
+  let downloadName = isClip ? `${format}.mp4` : `captioned.${format}`;
   if (format === 'transcript') downloadName = 'transcript.json';
   if (format === 'clips') downloadName = 'clips.json';
   if (format === 'cuts') downloadName = 'cuts.json';

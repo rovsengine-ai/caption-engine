@@ -102,6 +102,7 @@
 
       <div class="header-center">
         <span class="badge" id="plan-badge">Free plan</span>
+        <span class="badge badge-warn" id="render-status-badge" hidden>Changes need rendering</span>
         <div class="segmented aspect-select" id="aspect-select" role="radiogroup" aria-label="Aspect ratio">
           <button class="seg active" data-value="portrait" type="button">9:16</button>
           <button class="seg" data-value="landscape" type="button">16:9</button>
@@ -113,6 +114,7 @@
         <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
           <span class="knob">🌙</span>
         </button>
+        <button class="btn btn-outline btn-sm" id="btn-apply-render" type="button" disabled title="Re-render video with current cuts and style">Apply &amp; Render Video</button>
         <button class="btn btn-primary btn-sm" id="btn-export" type="button" disabled>Export</button>
         <div id="editor-user-slot"></div>
       </div>
@@ -124,6 +126,7 @@
         <button class="rail-btn active" data-rail="media" type="button"><span class="ic">🎬</span>Media</button>
         <button class="rail-btn" data-rail="text" type="button"><span class="ic">📝</span>Text</button>
         <button class="rail-btn" data-rail="autotrim" type="button"><span class="ic">✂️</span>Auto Trim</button>
+        <button class="rail-btn" data-rail="clips" type="button"><span class="ic">⚡</span>Clips</button>
       </nav>
 
       <aside class="side-panel">
@@ -219,6 +222,21 @@
             </div>
           </div>
 
+          <div class="panel-tabbed" data-panel="clips">
+            <div class="side-panel-head">
+              <h3>Viral Clips</h3>
+              <p>Find self-contained moments and export them as 9:16 reels.</p>
+            </div>
+            <div class="side-panel-body">
+              <button type="button" class="btn btn-primary btn-block" id="btn-find-clips" disabled>Find viral clips</button>
+              <p class="hint" id="clips-hint" style="margin-top:8px;">Generate captions first, then scan for clip-worthy moments.</p>
+              <div id="clips-source-badge" class="badge" hidden style="margin-top:10px;"></div>
+              <div id="clips-list" class="clips-list">
+                <div class="empty-state"><div class="es-ic">⚡</div>No clips yet.</div>
+              </div>
+            </div>
+          </div>
+
           <div class="side-panel-foot">
             <button type="submit" class="btn btn-primary btn-block" id="btn-generate" disabled>Generate captions</button>
             <p class="hint" id="generate-hint" style="margin-top:8px;">Choose a file to get started.</p>
@@ -279,6 +297,7 @@
         <div class="inspector-tabs tabs">
           <button class="tab active" data-inspector-tab="templates" type="button">Templates</button>
           <button class="tab" data-inspector-tab="text" type="button">Text</button>
+          <button class="tab" data-inspector-tab="cue" type="button">Cue</button>
         </div>
         <div class="inspector-body">
 
@@ -330,6 +349,42 @@
             </div>
 
             <p class="readonly-note">This previews the caption overlay live in the player. The baked-in render style comes from the Template you pick before generating.</p>
+          </div>
+
+          <div class="inspector-tabpanel" data-inspector-panel="cue">
+            <div id="cue-inspector-empty" class="empty-state">
+              <div class="es-ic">✏️</div>
+              Select a cue on the timeline or in the Text panel to edit it.
+            </div>
+            <div id="cue-inspector" hidden>
+              <div class="cue-inspector-head">
+                <strong id="cue-inspector-label">Cue</strong>
+                <span class="badge" id="cue-save-badge" hidden>Transcript saved</span>
+              </div>
+              <label class="field">
+                <span class="label">Cue text</span>
+                <textarea id="cue-text-edit" rows="3" spellcheck="true" placeholder="Edit the subtitle line…"></textarea>
+              </label>
+              <div class="cue-time-row">
+                <label class="field">
+                  <span class="label">Start</span>
+                  <input id="cue-start-edit" type="text" inputmode="decimal" placeholder="00:00.000" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span class="label">End</span>
+                  <input id="cue-end-edit" type="text" inputmode="decimal" placeholder="00:00.000" autocomplete="off" />
+                </label>
+              </div>
+              <div class="field">
+                <span class="label">Words — click to correct spelling</span>
+                <div id="cue-word-chips" class="cue-word-chips"></div>
+              </div>
+              <div class="cue-inspector-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-save-transcript">Save Transcript</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-cue-selection">Deselect</button>
+              </div>
+              <p class="readonly-note">Edits update SRT/ASS immediately. Re-render the video to bake changes into the MP4.</p>
+            </div>
           </div>
         </div>
       </aside>
