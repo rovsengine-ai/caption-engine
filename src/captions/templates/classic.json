@@ -1,0 +1,73 @@
+{
+  "scriptFallbacks": {
+    "Latin": "NotoSans_400Regular.ttf",
+    "Devanagari": "NotoSansDevanagari_400Regular.ttf",
+    "Telugu": "NotoSansTelugu_400Regular.ttf",
+    "Kannada": "NotoSansKannada_400Regular.ttf",
+    "Tamil": "NotoSansTamil_400Regular.ttf",
+    "Malayalam": "NotoSansMalayalam_400Regular.ttf",
+    "Bengali": "NotoSansBengali_400Regular.ttf",
+    "Gujarati": "NotoSansGujarati_400Regular.ttf",
+    "Gurmukhi": "NotoSansGurmukhi_400Regular.ttf",
+    "Odia": "NotoSansOriya_400Regular.ttf",
+    "Arabic": "NotoNastaliqUrdu_400Regular.ttf",
+    "Common": "NotoSans_400Regular.ttf"
+  },
+  "safeMargins": {
+    "portrait": {
+      "top": 0.08,
+      "bottom": 0.12,
+      "left": 0.05,
+      "right": 0.05
+    },
+    "landscape": {
+      "top": 0.06,
+      "bottom": 0.1,
+      "left": 0.06,
+      "right": 0.06
+    },
+    "square": {
+      "top": 0.08,
+      "bottom": 0.12,
+      "left": 0.05,
+      "right": 0.05
+    }
+  },
+  "id": "classic",
+  "name": "Classic",
+  "description": "Broadcast-safe standard subtitles on a semi-opaque black band.",
+  "aliases": [
+    "broadcast"
+  ],
+  "typography": {
+    "fontFamily": "Noto Sans",
+    "fontSizePx": 54,
+    "fontWeight": 600,
+    "lineSpacing": 1.36,
+    "textCase": "none",
+    "maxWordsPerCue": 8,
+    "maxCharsPerLine": 42,
+    "maxLines": 2
+  },
+  "colors": {
+    "fill": "#FFFFFF",
+    "stroke": {
+      "color": "#000000",
+      "widthRatio": 0.02
+    }
+  },
+  "backgroundBox": {
+    "color": "#000000B3",
+    "paddingPx": 16,
+    "borderRadiusPx": 4
+  },
+  "activeWord": {
+    "color": "#FFFFFF",
+    "scale": 1,
+    "fontWeight": 700
+  },
+  "motionDefault": {
+    "animation": "smooth-rise",
+    "intensity": "none"
+  }
+}

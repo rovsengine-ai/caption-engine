@@ -31,6 +31,7 @@ import { groupIntoCues } from '../captions/group.js';
 import { buildAss, buildSrt } from '../captions/ass.js';
 import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
 import { resolveStyle, resolveOutput, STYLE_DEFAULT_ANIMATION_TEMPLATE } from '../captions/style.js';
+import { templateMotionDefault } from '../captions/template.js';
 import {
   ANIMATION_TEMPLATES, resolveIntensity, resolveAnimationTemplateName,
 } from '../captions/animation.js';
@@ -227,6 +228,17 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   log.step(`Inspecting ${basename(inputPath)}`);
   const info: MediaInfo = await probeMedia(inputPath);
   assertHasAudio(info);
+
+  const defaultMaxDurationSec = 30;
+  const maxDurationSec = opts.maxDuration
+    ?? (process.env.MAX_VIDEO_DURATION_SEC ? Number(process.env.MAX_VIDEO_DURATION_SEC) : defaultMaxDurationSec);
+  if (!opts.allowLongVideo && Number.isFinite(maxDurationSec) && maxDurationSec > 0 && info.durationSec > maxDurationSec) {
+    throw new CaptionEngineError(
+      `Video duration (${info.durationSec.toFixed(1)}s) exceeds the ${maxDurationSec}s limit.`,
+      `Currently, video processing is limited to ${maxDurationSec} seconds. Pass --allow-long-video or set MAX_VIDEO_DURATION_SEC to process longer files.`,
+    );
+  }
+
   log.info(
     `${info.kind} · ${info.formatName} · ${info.durationSec.toFixed(1)}s` +
       (info.width ? ` · ${info.width}x${info.height}` : '') +
@@ -1085,7 +1097,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           ...(opts.font !== undefined ? { fontFamily: opts.font } : {}),
           ...(opts.activeColor !== undefined ? { activeColor: opts.activeColor } : {}),
           ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
-        });
+        }, { aspect: opts.aspect, preferTemplate: opts.preferTemplate });
         const rows: ProsodyDiagnosticRow[] = prosody.words.map((w) => {
           // Read the decision that actually rendered, not a recomputation.
           // Under --tone-scope cue this is the LINE's tone, which is what the
@@ -1093,7 +1105,9 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           const a = applied.get(w.index);
           const toneStyle = a?.style;
           const resolved = resolveWordStyle(baseStyle, false, {
-            activeScale: opts.activeScale,
+            activeScale: opts.activeScaleExplicit
+              ? opts.activeScale
+              : (baseStyle.activeWord?.scale ?? opts.activeScale),
             activeBold: opts.activeBold,
             ...(toneStyle ? { tone: toneStyle } : {}),
           });
@@ -1151,7 +1165,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
     ...(opts.positionY !== undefined ? { positionY: opts.positionY } : {}),
     ...(opts.maxWordsPerCue !== undefined ? { maxWordsPerCue: opts.maxWordsPerCue } : {}),
-  });
+  }, { aspect: opts.aspect, preferTemplate: opts.preferTemplate });
+  const activeScale = opts.activeScaleExplicit
+    ? opts.activeScale
+    : (style.activeWord?.scale ?? opts.activeScale);
 
   // ---- Kinetic captions: resolve ONE template/intensity for the whole
   // ---- render. Not per-cue — reservedWidth (src/captions/svg.ts:layoutCue)
@@ -1175,7 +1192,9 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     ? undefined
     : resolveAnimationTemplateName({
         requested: opts.animationTemplate,
-        stylePresetDefault: STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style],
+        stylePresetDefault: opts.preferTemplate
+          ? (style.animationTemplate ?? templateMotionDefault(opts.style) ?? STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style])
+          : (STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style] ?? style.animationTemplate ?? templateMotionDefault(opts.style)),
         themeToneTemplates: theme.motion?.toneTemplates,
         tone: videoTone?.tone,
         toneConfidence: videoTone?.share,
@@ -1211,7 +1230,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         video: { width, height },
         style,
         highlight: opts.highlight === 'none' ? 'none' : 'active-word',
-        activeScale: opts.activeScale,
+        activeScale,
         activeBold: opts.activeBold,
       }),
       'utf8',
@@ -1298,7 +1317,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     // peak memory flat regardless of length.
     const svgOpts = {
       width, height, style,
-      activeScale: opts.activeScale,
+      activeScale,
       activeBold: opts.activeBold,
       highlight: opts.highlight,
       // undefined unless --prosody ran, which is what keeps the default path

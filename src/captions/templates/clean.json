@@ -1,0 +1,74 @@
+{
+  "scriptFallbacks": {
+    "Latin": "NotoSans_400Regular.ttf",
+    "Devanagari": "NotoSansDevanagari_400Regular.ttf",
+    "Telugu": "NotoSansTelugu_400Regular.ttf",
+    "Kannada": "NotoSansKannada_400Regular.ttf",
+    "Tamil": "NotoSansTamil_400Regular.ttf",
+    "Malayalam": "NotoSansMalayalam_400Regular.ttf",
+    "Bengali": "NotoSansBengali_400Regular.ttf",
+    "Gujarati": "NotoSansGujarati_400Regular.ttf",
+    "Gurmukhi": "NotoSansGurmukhi_400Regular.ttf",
+    "Odia": "NotoSansOriya_400Regular.ttf",
+    "Arabic": "NotoNastaliqUrdu_400Regular.ttf",
+    "Common": "NotoSans_400Regular.ttf"
+  },
+  "safeMargins": {
+    "portrait": {
+      "top": 0.12,
+      "bottom": 0.22,
+      "left": 0.06,
+      "right": 0.06
+    },
+    "landscape": {
+      "top": 0.08,
+      "bottom": 0.12,
+      "left": 0.05,
+      "right": 0.05
+    },
+    "square": {
+      "top": 0.1,
+      "bottom": 0.16,
+      "left": 0.06,
+      "right": 0.06
+    }
+  },
+  "id": "clean",
+  "name": "Clean",
+  "description": "Restrained subtitle with a clean drop shadow and high legibility.",
+  "aliases": [
+    "clean-sub"
+  ],
+  "typography": {
+    "fontFamily": "Noto Sans",
+    "fontSizePx": 64,
+    "fontWeight": 600,
+    "lineSpacing": 1.38,
+    "textCase": "none",
+    "maxWordsPerCue": 5,
+    "maxCharsPerLine": 24,
+    "maxLines": 2
+  },
+  "colors": {
+    "fill": "#FFFFFF",
+    "stroke": {
+      "color": "#000000",
+      "widthRatio": 0.06
+    },
+    "shadow": {
+      "color": "#000000",
+      "blur": 10,
+      "offsetX": 0,
+      "offsetY": 3
+    }
+  },
+  "activeWord": {
+    "color": "#FFE566",
+    "scale": 1.06,
+    "fontWeight": 700
+  },
+  "motionDefault": {
+    "animation": "smooth-rise",
+    "intensity": "subtle"
+  }
+}

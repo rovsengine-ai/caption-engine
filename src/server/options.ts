@@ -1,5 +1,6 @@
 import type { AspectPreset } from '../captions/style.js';
 import { listStylePresets } from '../captions/style.js';
+import { listTemplateIds, loadTemplates } from '../captions/template.js';
 import type { CliOptions, OutputFormat } from '../cli/args.js';
 import { listLanguages } from '../config/languages.js';
 import { CaptionEngineError } from '../errors.js';
@@ -19,25 +20,16 @@ import { join } from 'node:path';
 const ASPECTS: AspectPreset[] = ['portrait', 'landscape', 'square', 'original'];
 const FORMATS: Array<'mp4' | 'srt' | 'ass' | 'json'> = ['mp4', 'srt', 'ass', 'json'];
 
-/** FluxoCut-style template gallery → engine style preset (+ motion hint). */
-export const TEMPLATE_GALLERY = [
-  { id: 'ink-flow', name: 'Ink Flow', style: 'lyric', motion: 'subtle', blurb: 'Cursive energy, soft glow' },
-  { id: 'script-duo', name: 'Script Duo', style: 'elegant', motion: 'subtle', blurb: 'Bold sans + script accent' },
-  { id: 'type-stairs', name: 'Type Stairs', style: 'editorial', motion: 'expressive', blurb: 'Stepped typographic stack' },
-  { id: 'word-stairs', name: 'Word Stairs', style: 'kinetic', motion: 'expressive', blurb: 'Word-by-word climb' },
-  { id: 'slice-glow', name: 'Slice Glow', style: 'neon', motion: 'expressive', blurb: 'Neon sliced glow' },
-  { id: 'zyada', name: 'Zyada', style: 'minimal', motion: 'subtle', blurb: 'Hyper clean green outline' },
-  { id: 'hyper-clean', name: 'Hyper Clean', style: 'minimal', motion: 'none', blurb: 'Minimal outline glow' },
-  { id: 'editorial', name: 'Editorial', style: 'editorial', motion: 'none', blurb: 'Magazine-clean serif/sans' },
-  { id: 'pop-viral', name: 'Pop Viral', style: 'pop', motion: 'expressive', blurb: 'High-impact active word pop' },
-  { id: 'viral-minimal', name: 'Viral Minimalist', style: 'creator', motion: 'subtle', blurb: 'Quiet flex, loud word' },
-  { id: 'active-box', name: 'Active Box', style: 'karaoke', motion: 'subtle', blurb: 'Pill behind spoken word' },
-  { id: 'ekdam', name: 'Ekdam', style: 'bold', motion: 'expressive', blurb: 'Punchy uppercase kinetic' },
-  { id: 'kinetic-stack', name: 'Kinetic Stack', style: 'kinetic', motion: 'expressive', blurb: 'Stacked word hits' },
-  { id: 'neon-script', name: 'Neon Script', style: 'neon', motion: 'subtle', blurb: 'Cyan neon script vibe' },
-  { id: 'felt', name: 'Felt', style: 'soft', motion: 'subtle', blurb: 'Warm soft caption feel' },
-  { id: 'trio-lockup', name: 'Trio Lockup', style: 'classic', motion: 'none', blurb: 'Three-word lockup' },
-] as const;
+/** Data-template gallery. Ids match src/captions/templates so the editor re-render posts the same id the compiler knows. */
+export const TEMPLATE_GALLERY = loadTemplates().map((t) => ({
+  id: t.id,
+  name: t.name,
+  style: t.id,
+  motion: (t.motionDefault.intensity === 'auto' ? 'subtle' : t.motionDefault.intensity) as
+    'none' | 'subtle' | 'expressive',
+  blurb: t.description,
+  animation: t.motionDefault.animation,
+}));
 
 export interface JobUiOptions {
   language?: string;
@@ -82,6 +74,8 @@ export function baseCliOptions(overrides: Partial<CliOptions> & Pick<CliOptions,
     dryRun: false,
     verbose: false,
     json: false,
+    maxDuration: 30,
+    allowLongVideo: false,
     yes: true,
     ...overrides,
   };
@@ -137,6 +131,7 @@ function parseProvider(raw: unknown): ProviderMode {
 function resolveTemplateStyle(body: Record<string, unknown>): {
   style: string;
   motion: CliOptions['motion'];
+  preferTemplate: boolean;
 } {
   const templateId = typeof body.template === 'string' ? body.template.trim().toLowerCase() : '';
   if (templateId) {
@@ -145,8 +140,13 @@ function resolveTemplateStyle(body: Record<string, unknown>): {
       return {
         style: t.style,
         motion: (t.motion as CliOptions['motion']) || 'none',
+        preferTemplate: true,
       };
     }
+    throw new CaptionEngineError(
+      `Unknown template "${templateId}".`,
+      `Available: ${listTemplateIds().join(', ')}`,
+    );
   }
 
   const style = typeof body.style === 'string' && body.style.trim()
@@ -162,7 +162,7 @@ function resolveTemplateStyle(body: Record<string, unknown>): {
   const motion = (['none', 'subtle', 'expressive', 'auto'].includes(motionRaw)
     ? motionRaw
     : 'none') as CliOptions['motion'];
-  return { style, motion };
+  return { style, motion, preferTemplate: false };
 }
 
 /**
@@ -183,7 +183,7 @@ export function uiOptionsToCli(
     throw new CaptionEngineError(`Unknown script "${scriptRaw}".`, 'Valid: native, roman');
   }
 
-  const { style, motion } = resolveTemplateStyle(body);
+  const { style, motion, preferTemplate } = resolveTemplateStyle(body);
 
   const aspectRaw = typeof body.aspect === 'string' ? body.aspect.trim().toLowerCase() : 'portrait';
   if (!(ASPECTS as string[]).includes(aspectRaw)) {
@@ -216,6 +216,8 @@ export function uiOptionsToCli(
     script: scriptRaw,
     style,
     motion,
+    preferTemplate,
+    ...(preferTemplate ? { template: style } : {}),
     aspect: aspectRaw as AspectPreset,
     format: toPipelineFormat(requestedFormats),
     codeSwitching,

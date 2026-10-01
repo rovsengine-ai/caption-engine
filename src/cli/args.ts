@@ -1,5 +1,6 @@
 import { CaptionEngineError } from '../errors.js';
 import { listStylePresets, MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX } from '../captions/style.js';
+import { requireTemplate } from '../captions/template.js';
 import type { AspectPreset } from '../captions/style.js';
 import {
   MOTION_LEVELS, listAnimationTemplates, assertValidMotionLevel,
@@ -17,6 +18,12 @@ export interface CliOptions {
   provider?: string;
   format: OutputFormat;
   style: string;
+  /** Data-template id. When set, it replaces --style and wins over a same-named preset. */
+  template?: string;
+  /** Set when --template (or the web gallery) should compile a data template. */
+  preferTemplate?: boolean;
+  /** Set when the user passed --active-scale, so a template default does not replace it. */
+  activeScaleExplicit?: boolean;
   aspect: AspectPreset;
   highlight: 'active-word' | 'none';
   activeScale: number;
@@ -111,6 +118,10 @@ export interface CliOptions {
    * visual_reject cuts. Implies --auto-trim. Needs ANTHROPIC_API_KEY.
    */
   analyzeVideo: boolean;
+  /** Maximum video duration allowed in seconds (default 30). */
+  maxDuration?: number;
+  /** Allow processing videos longer than maxDuration. */
+  allowLongVideo: boolean;
   transcriptOut?: string;
   cutsIn?: string;
   cutsOut?: string;
@@ -133,6 +144,9 @@ USAGE
   caption-engine doctor            check every rendering dependency (functional probes)
   caption-engine languages         list supported languages
   caption-engine fonts             list discovered font families for --font
+  caption-engine templates         list data-driven caption templates
+  caption-engine templates --validate-fonts
+                                   prove each template's fonts cover every script (exit 1 if not)
 
 INPUT
   Video: .mp4 .mov .mkv .webm .avi .m4v .mpg .wmv .flv .ts
@@ -156,6 +170,8 @@ CORE OPTIONS
 
 APPEARANCE
       --style <name>        ${listStylePresets().join(' | ')}   (default: default)
+      --template <id>       Data template (clean, bold-social, karaoke, …). Replaces --style.
+                            Run "caption-engine templates" for the full list.
       --aspect <name>       portrait | landscape | square | original  (default: portrait)
       --highlight <mode>    active-word | none                   (default: active-word)
       --active-scale <n>    Scale of the highlighted word        (default: 1.08)
@@ -314,6 +330,8 @@ OTHER
                             Off by default: replacing a video while keeping the
                             same filename otherwise silently reuses the old take's
                             transcript, and every caption lands at the wrong time.
+      --max-duration <sec>  Maximum allowed video duration in seconds (default: 30)
+      --allow-long-video    Allow processing videos longer than 30 seconds
       --dry-run             Show the plan without transcribing or rendering
       --json                Machine-readable output
   -v, --verbose             Verbose logging
@@ -387,6 +405,7 @@ export type ParsedCommand =
   | { command: 'doctor' }
   | { command: 'languages' }
   | { command: 'fonts' }
+  | { command: 'templates'; args: string[] }
   | { command: 'run'; options: CliOptions };
 
 export function parseArgs(argv: string[]): ParsedCommand {
@@ -394,6 +413,7 @@ export function parseArgs(argv: string[]): ParsedCommand {
   if (argv[0] === 'doctor') return { command: 'doctor' };
   if (argv[0] === 'languages' || argv[0] === '--list-languages') return { command: 'languages' };
   if (argv[0] === 'fonts' || argv[0] === '--list-fonts') return { command: 'fonts' };
+  if (argv[0] === 'templates') return { command: 'templates', args: argv.slice(1) };
   if (argv.includes('-h') || argv.includes('--help')) return { command: 'help' };
 
   // `render` is a thin alias that GUARANTEES no ASR call: it requires a
@@ -448,6 +468,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
     dryRun: false,
     verbose: false,
     json: false,
+    maxDuration: 30,
+    allowLongVideo: false,
     yes: false,
   };
   let formatExplicit = false;
@@ -480,6 +502,13 @@ export function parseArgs(argv: string[]): ParsedCommand {
         o.format = v; formatExplicit = true; i++; break;
       }
       case '--style': o.style = needValue(a, next); i++; break;
+      case '--template': {
+        const id = needValue(a, next);
+        o.template = requireTemplate(id).id;
+        o.preferTemplate = true;
+        i++;
+        break;
+      }
       case '--aspect': {
         const v = needValue(a, next) as AspectPreset;
         if (!ASPECTS.includes(v)) {
@@ -503,7 +532,11 @@ export function parseArgs(argv: string[]): ParsedCommand {
         }
         o.script = v; i++; break;
       }
-      case '--active-scale': o.activeScale = num(a, next, 1, 2); i++; break;
+      case '--active-scale':
+        o.activeScale = num(a, next, 1, 2);
+        o.activeScaleExplicit = true;
+        i++;
+        break;
       case '--active-color': {
         const value = needValue(a, next);
         if (!/^#?(?:[\da-f]{3}|[\da-f]{6})$/i.test(value)) {
@@ -610,6 +643,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
         i++;
         break;
       }
+      case '--max-duration': o.maxDuration = num(a, next, 1, 86400); i++; break;
+      case '--allow-long-video': o.allowLongVideo = true; break;
       case '--allow-stale': o.allowStale = true; break;
       case '--dry-run': o.dryRun = true; break;
       case '--json': o.json = true; break;
@@ -630,6 +665,8 @@ export function parseArgs(argv: string[]): ParsedCommand {
         input = a;
     }
   }
+
+  if (o.template) o.style = o.template;
 
   if (!input) {
     throw new CaptionEngineError('No input file given.', 'Usage: caption-engine <input> [options]');

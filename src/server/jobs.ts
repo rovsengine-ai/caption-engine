@@ -437,8 +437,14 @@ export async function exportJobClip(
   await initShaper();
   const cues = groupIntoCues(clipped, { maxWordsPerCue: 4 });
   const preset = OUTPUT_PRESETS.portrait;
+  const templateId = typeof job.lastFields.template === 'string'
+    ? job.lastFields.template.trim()
+    : '';
   const styleName = resolveJobStyleName(job);
-  const style = resolveStyle(styleName, preset.height, {});
+  const style = resolveStyle(styleName, preset.height, {}, {
+    aspect: 'portrait',
+    preferTemplate: templateId.length > 0,
+  });
 
   const plans = planCaptionFrames(cues, {
     width: preset.width,

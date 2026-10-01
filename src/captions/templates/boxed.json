@@ -1,0 +1,73 @@
+{
+  "scriptFallbacks": {
+    "Latin": "NotoSans_400Regular.ttf",
+    "Devanagari": "NotoSansDevanagari_400Regular.ttf",
+    "Telugu": "NotoSansTelugu_400Regular.ttf",
+    "Kannada": "NotoSansKannada_400Regular.ttf",
+    "Tamil": "NotoSansTamil_400Regular.ttf",
+    "Malayalam": "NotoSansMalayalam_400Regular.ttf",
+    "Bengali": "NotoSansBengali_400Regular.ttf",
+    "Gujarati": "NotoSansGujarati_400Regular.ttf",
+    "Gurmukhi": "NotoSansGurmukhi_400Regular.ttf",
+    "Odia": "NotoSansOriya_400Regular.ttf",
+    "Arabic": "NotoNastaliqUrdu_400Regular.ttf",
+    "Common": "NotoSans_400Regular.ttf"
+  },
+  "safeMargins": {
+    "portrait": {
+      "top": 0.12,
+      "bottom": 0.22,
+      "left": 0.06,
+      "right": 0.06
+    },
+    "landscape": {
+      "top": 0.08,
+      "bottom": 0.12,
+      "left": 0.05,
+      "right": 0.05
+    },
+    "square": {
+      "top": 0.1,
+      "bottom": 0.16,
+      "left": 0.06,
+      "right": 0.06
+    }
+  },
+  "id": "boxed",
+  "name": "Boxed",
+  "description": "Solid rounded background box with contrasting text.",
+  "aliases": [
+    "box"
+  ],
+  "typography": {
+    "fontFamily": "Noto Sans",
+    "fontSizePx": 64,
+    "fontWeight": 700,
+    "lineSpacing": 1.4,
+    "textCase": "none",
+    "maxWordsPerCue": 4,
+    "maxCharsPerLine": 22,
+    "maxLines": 2
+  },
+  "colors": {
+    "fill": "#FFFFFF",
+    "stroke": {
+      "color": "#000000",
+      "widthRatio": 0
+    }
+  },
+  "backgroundBox": {
+    "color": "#141414",
+    "paddingPx": 18,
+    "borderRadiusPx": 18
+  },
+  "activeWord": {
+    "color": "#FFD400",
+    "scale": 1.06,
+    "fontWeight": 700
+  },
+  "motionDefault": {
+    "animation": "pop",
+    "intensity": "subtle"
+  }
+}
