@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { FFMPEG, FFPROBE } from '../media/ffmpeg.js';
 import { fontReport } from '../text/fonts.js';
 import { shapeText, initShaper } from '../text/shaper.js';
@@ -310,7 +310,92 @@ export async function runDoctor(): Promise<CheckResult[]> {
         '      Not needed for --transcript-in, --dry-run or doctor.',
   });
 
+  // --- Local AI (optional) ------------------------------------------------
+  //
+  // These never block. Cloud providers keep working when whisper.cpp and
+  // Ollama are absent. Green means the local path is actually usable.
+  results.push(await localWhisperCheck());
+  results.push(await localLlmCheck());
+
   return results;
+}
+
+async function httpReached(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    await res.arrayBuffer().catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function localWhisperCheck(): Promise<CheckResult> {
+  const endpoint = (process.env.LOCAL_WHISPER_ENDPOINT ?? 'http://127.0.0.1:8080').replace(/\/+$/, '');
+  const serverUp = await httpReached(`${endpoint}/`);
+  const model = process.env.WHISPER_MODEL_PATH?.trim();
+  const modelOk = Boolean(model && existsSync(model));
+  const bin = resolveBinary('whisper-cli').resolved || resolveBinary('whisper-server').resolved;
+  const binaryReady = Boolean(bin && modelOk);
+
+  if (serverUp) {
+    return {
+      name: 'local Whisper',
+      ok: true,
+      detail: `server reachable at ${endpoint}`,
+    };
+  }
+  if (binaryReady) {
+    return {
+      name: 'local Whisper',
+      ok: true,
+      detail: `server not running; ${bin} can load ${model}`,
+    };
+  }
+  return {
+    name: 'local Whisper',
+    ok: false,
+    detail: 'not running (optional — cloud ASR still works)',
+    fix: 'npm run local:setup && npm run local:start',
+  };
+}
+
+async function localLlmCheck(): Promise<CheckResult> {
+  const endpoint = process.env.LOCAL_LLM_ENDPOINT ?? 'http://127.0.0.1:11434/api/generate';
+  const model = process.env.LOCAL_LLM_MODEL?.trim() || 'gemma3:4b';
+  let origin = 'http://127.0.0.1:11434';
+  try { origin = new URL(endpoint).origin; } catch { /* keep default */ }
+
+  try {
+    const res = await fetch(`${origin}/api/tags`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) {
+      return {
+        name: 'local LLM',
+        ok: false,
+        detail: `Ollama answered ${res.status} (optional)`,
+        fix: 'npm run local:start',
+      };
+    }
+    const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
+    const names = (data.models ?? []).map((m) => m.name || m.model || '').filter(Boolean);
+    const pulled = names.some((n) => n === model || n.startsWith(`${model}:`) || model.startsWith(n));
+    if (pulled) {
+      return { name: 'local LLM', ok: true, detail: `${model} pulled at ${origin}` };
+    }
+    return {
+      name: 'local LLM',
+      ok: false,
+      detail: `Ollama is up, ${model} is not pulled (optional)`,
+      fix: `ollama pull ${model}`,
+    };
+  } catch {
+    return {
+      name: 'local LLM',
+      ok: false,
+      detail: 'Ollama not running (optional — cloud transliteration still works)',
+      fix: 'npm run local:setup && npm run local:start',
+    };
+  }
 }
 
 /**
@@ -324,6 +409,8 @@ export function isBlocking(r: CheckResult): boolean {
   if (r.ok) return false;
   if (r.name.startsWith('font:')) return false;      // limits specific scripts
   if (r.name === 'ASR API key') return false;         // not needed with --transcript-in
+  if (r.name === 'local Whisper') return false;       // optional local ASR
+  if (r.name === 'local LLM') return false;           // optional local romanisation
   if (r.name.startsWith('  rasteriser:')) return false; // covered by the summary line
   return true;
 }

@@ -66,11 +66,26 @@ Sarvam with English protected, runs Auto Trim, renders portrait with the bold st
 writes `outputs/my-video-hinglish.mp4`. Paths with spaces work — quote them.
 See [Windows and macOS setup](#windows-and-macos-setup).
 
+## Local AI (zero cloud)
+
+On Apple Silicon the same pipeline can run with no ASR or transliteration API.
+whisper.cpp (Metal) supplies word timestamps; Ollama romanises Indic script to
+natural Hinglish. Cloud providers stay available, and the default provider is
+still Sarvam → ElevenLabs until you opt in.
+
+```bash
+npm run local:setup
+npm run local:start
+node dist/src/cli.js my-video.mp4 --provider local --script roman --transliterate local-llm --auto-trim -o outputs/my-video-local.mp4
+```
+
+Setup, models, and troubleshooting: [docs/LOCAL-AI.md](docs/LOCAL-AI.md).
+
 ## What it does
 
 - **Input**: MP4, MOV, MKV, WebM, AVI, M4V, MPG, WMV, FLV, TS · WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, CAF
 - Audio is extracted automatically (16 kHz mono) before transcription — never uploads the video
-- **Word-level timestamps** from ElevenLabs Scribe v2 or Deepgram Nova-3
+- **Word-level timestamps** from ElevenLabs Scribe v2, Deepgram Nova-3, or local whisper.cpp
 - **13 languages with verified rendering**, native script or the option of Roman/Hinglish output
 - **Auto Trim**: silences, filler words, false starts — every cut reviewable and restorable
 - **Exports**: burned-in MP4, SRT, ASS, JSON

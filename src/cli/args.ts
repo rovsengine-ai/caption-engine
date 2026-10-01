@@ -73,7 +73,7 @@ export interface CliOptions {
   noAsr?: boolean;
   /** Force a rasteriser: resvg | ffmpeg. */
   rasteriser?: string;
-  /** Transliteration backend for --script roman: local | sarvam | http. */
+  /** Transliteration backend for --script roman: local | local-llm | sarvam | http. */
   transliterate?: string;
   /** Extra Hinglish glossary file, merged over the built-in one. */
   glossary?: string;
@@ -164,9 +164,12 @@ CORE OPTIONS
                             pan→pa, ori→or, asm→as, nep→ne, mar→mr, eng→en).
   -f, --format <fmt>        mp4 | srt | ass | json | all          (default: from -o, else mp4)
   -p, --provider <name>     sarvam_fallback_elevenlabs | sarvam | elevenlabs | deepgram
+                            | local | local_fallback_elevenlabs
                             (default: $ASR_PROVIDER or sarvam_fallback_elevenlabs)
                             sarvam_fallback_elevenlabs tries Sarvam first, then
                             ElevenLabs Scribe when Sarvam fails or lacks word timings
+                            local runs whisper.cpp on this machine (no API key).
+                            local_fallback_elevenlabs tries that first, then Scribe.
 
 APPEARANCE
       --style <name>        ${listStylePresets().join(' | ')}   (default: default)
@@ -191,12 +194,14 @@ APPEARANCE
                               kn  ಇದು ಒಂದು important meeting
                                   → Idu ondu important meeting        (Kannglish)
                             English words stay as they are in every language.
-      --transliterate <b>   auto | local | sarvam | http   (default: auto —
+      --transliterate <b>   auto | local | local-llm | sarvam | http   (default: auto —
                             sarvam/http if configured, else local)
-                            local  offline rules. LOWER QUALITY on English written
-                                   in Devanagari; leans on the glossary.
-                            sarvam model-based, needs SARVAM_API_KEY
-                            http   your own endpoint via TRANSLITERATE_URL
+                            local     offline rules. LOWER QUALITY on English written
+                                      in Devanagari; leans on the glossary.
+                            local-llm Ollama on this machine (no API key). Falls
+                                      back to local rules when the model is down.
+                            sarvam    model-based, needs SARVAM_API_KEY
+                            http      your own endpoint via TRANSLITERATE_URL
       --prosody             Measure local audio prosody (loudness + F0 pitch,
                             all offline) and style each word by its tone.
                             Off by default; without it output is unchanged.
@@ -371,7 +376,11 @@ ENVIRONMENT
   TRANSLITERATE_PROVIDER default backend for --script roman
   TRANSLITERATE_URL      endpoint for --transliterate http
   HINGLISH_GLOSSARY      default extra glossary file
-  ASR_PROVIDER           default provider (sarvam_fallback_elevenlabs | sarvam | elevenlabs | deepgram)
+  ASR_PROVIDER           default provider (sarvam_fallback_elevenlabs | sarvam | elevenlabs | deepgram | local | local_fallback_elevenlabs)
+  LOCAL_WHISPER_ENDPOINT whisper.cpp server (default http://127.0.0.1:8080)
+  WHISPER_MODEL_PATH     ggml model used when the server is not running
+  LOCAL_LLM_ENDPOINT     Ollama generate URL (default http://127.0.0.1:11434/api/generate)
+  LOCAL_LLM_MODEL        model name for --transliterate local-llm (default gemma3:4b)
   FFMPEG_PATH / FFPROBE_PATH   custom binary locations
   FONT_DIR               extra font directories (colon-separated)
 `;

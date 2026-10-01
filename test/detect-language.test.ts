@@ -215,9 +215,9 @@ describe('provider capability table', () => {
   });
 
   test('providersFor ranks model backends ahead of rules', () => {
-    assert.deepEqual(providersFor('hi'), ['sarvam', 'http', 'local']);
-    assert.deepEqual(providersFor('kn'), ['sarvam', 'http', 'local']);
-    assert.deepEqual(providersFor('ta'), ['sarvam', 'http']);
+    assert.deepEqual(providersFor('hi'), ['sarvam', 'local-llm', 'http', 'local']);
+    assert.deepEqual(providersFor('kn'), ['sarvam', 'local-llm', 'http', 'local']);
+    assert.deepEqual(providersFor('ta'), ['sarvam', 'local-llm', 'http']);
   });
 
   test('region subtags resolve', () => {
@@ -225,6 +225,9 @@ describe('provider capability table', () => {
   });
 
   test('the table lists every backend', () => {
-    assert.deepEqual(listCapabilities().map((c) => c.name), ['local', 'sarvam', 'http', 'native']);
+    assert.deepEqual(
+      listCapabilities().map((c) => c.name),
+      ['local', 'local-llm', 'sarvam', 'http', 'native'],
+    );
   });
 });

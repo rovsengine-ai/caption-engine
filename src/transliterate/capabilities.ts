@@ -11,7 +11,7 @@
  * expensive way to find out.
  */
 
-export type TransliteratorName = 'local' | 'sarvam' | 'http' | 'native';
+export type TransliteratorName = 'local' | 'local-llm' | 'sarvam' | 'http' | 'native';
 
 export interface ProviderCapability {
   name: TransliteratorName;
@@ -40,6 +40,9 @@ const LOCAL_LANGUAGES = ['hi', 'mr', 'ne', 'sa', 'kok', 'mai', 'kn'];
  */
 const SARVAM_LANGUAGES = ['hi', 'mr', 'ne', 'te', 'kn', 'ta', 'ml', 'bn', 'gu', 'pa', 'or', 'as'];
 
+/** Same twelve languages, romanised by a local LLM instead of Sarvam's API. */
+const LOCAL_LLM_LANGUAGES = SARVAM_LANGUAGES;
+
 export const CAPABILITIES: Record<TransliteratorName, ProviderCapability> = {
   local: {
     name: 'local',
@@ -47,6 +50,13 @@ export const CAPABILITIES: Record<TransliteratorName, ProviderCapability> = {
     offline: true,
     needs: null,
     description: 'built-in rules, Devanagari + Kannada, deterministic and free',
+  },
+  'local-llm': {
+    name: 'local-llm',
+    languages: LOCAL_LLM_LANGUAGES,
+    offline: true,
+    needs: null,
+    description: 'local LLM via Ollama, 12 Indic languages, no API key',
   },
   sarvam: {
     name: 'sarvam',
@@ -86,12 +96,18 @@ export function providerSupports(name: TransliteratorName, language: string): bo
 
 /** Backends that can romanise this language, best-quality first. */
 export function providersFor(language: string): TransliteratorName[] {
-  return (['sarvam', 'http', 'local'] as TransliteratorName[])
+  return (['sarvam', 'local-llm', 'http', 'local'] as TransliteratorName[])
     .filter((n) => providerSupports(n, language));
 }
 
 export function listCapabilities(): ProviderCapability[] {
-  return [CAPABILITIES.local, CAPABILITIES.sarvam, CAPABILITIES.http, CAPABILITIES.native];
+  return [
+    CAPABILITIES.local,
+    CAPABILITIES['local-llm'],
+    CAPABILITIES.sarvam,
+    CAPABILITIES.http,
+    CAPABILITIES.native,
+  ];
 }
 
 /**
@@ -109,7 +125,7 @@ export function explainUnsupported(language: string, chosen: TransliteratorName)
     for (const a of alternatives) {
       const cap = CAPABILITIES[a];
       lines.push(
-        `  --transliterate ${a.padEnd(7)} ${cap.description}` +
+        `  --transliterate ${a.padEnd(10)} ${cap.description}` +
           (cap.needs ? `   (needs ${cap.needs})` : ''),
       );
     }

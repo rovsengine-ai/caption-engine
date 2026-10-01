@@ -4,24 +4,29 @@ import { AsrError, type AsrProvider, type TranscribeOptions } from './types.js';
 import { ElevenLabsScribe } from './elevenlabs.js';
 import { DeepgramNova } from './deepgram.js';
 import { SarvamAI } from './sarvam.js';
+import { LocalWhisper } from './local-whisper.js';
 
 export * from './types.js';
-export { ElevenLabsScribe, DeepgramNova, SarvamAI };
+export { ElevenLabsScribe, DeepgramNova, SarvamAI, LocalWhisper };
 
-export type ProviderName = 'elevenlabs' | 'deepgram' | 'sarvam';
+export type ProviderName = 'elevenlabs' | 'deepgram' | 'sarvam' | 'local';
 
 /**
  * UI / CLI provider modes.
  * `sarvam_fallback_elevenlabs` tries Sarvam first (Indic/Hinglish), then
  * ElevenLabs Scribe when Sarvam fails or cannot supply word timings.
+ * `local` and `local_fallback_elevenlabs` run whisper.cpp on this machine.
+ * They are opt-in. The default stays `sarvam_fallback_elevenlabs`.
  */
-export type ProviderMode = ProviderName | 'sarvam_fallback_elevenlabs';
+export type ProviderMode = ProviderName | 'sarvam_fallback_elevenlabs' | 'local_fallback_elevenlabs';
 
 export const PROVIDER_MODES: ProviderMode[] = [
   'sarvam_fallback_elevenlabs',
   'sarvam',
   'elevenlabs',
   'deepgram',
+  'local',
+  'local_fallback_elevenlabs',
 ];
 
 /** Default when ASR_PROVIDER / --provider is unset. */
@@ -39,9 +44,65 @@ function constructProvider(name: ProviderName, env: NodeJS.ProcessEnv): AsrProvi
       return new DeepgramNova(env.DEEPGRAM_API_KEY ?? '');
     case 'sarvam':
       return new SarvamAI(env.SARVAM_API_KEY ?? '');
+    case 'local':
+      // No API key. A missing server is an error at transcribe time, so a
+      // fallback chain can still try the next provider.
+      return new LocalWhisper(env);
     default: {
       const _exhaustive: never = name;
       throw new AsrError(`Unknown ASR provider "${String(_exhaustive)}"`, 'registry');
+    }
+  }
+}
+
+/** The single provider a chain mode stands for when a caller wants one adapter. */
+function primaryProvider(raw: string): ProviderName | null {
+  switch (raw) {
+    case 'sarvam_fallback_elevenlabs':
+      return 'sarvam';
+    case 'local_fallback_elevenlabs':
+      return 'local';
+    case 'elevenlabs':
+    case 'deepgram':
+    case 'sarvam':
+    case 'local':
+      return raw;
+    default:
+      return null;
+  }
+}
+
+function chainFor(mode: ProviderMode): ProviderName[] {
+  switch (mode) {
+    case 'sarvam_fallback_elevenlabs':
+      return ['sarvam', 'elevenlabs'];
+    case 'local_fallback_elevenlabs':
+      return ['local', 'elevenlabs'];
+    case 'sarvam':
+    case 'elevenlabs':
+    case 'deepgram':
+    case 'local':
+      return [mode];
+    default: {
+      const _exhaustive: never = mode;
+      throw new AsrError(`Unknown ASR provider "${String(_exhaustive)}"`, 'registry');
+    }
+  }
+}
+
+function credentialHint(name: ProviderName): string {
+  switch (name) {
+    case 'sarvam':
+      return 'SARVAM_API_KEY';
+    case 'elevenlabs':
+      return 'ELEVENLABS_API_KEY';
+    case 'deepgram':
+      return 'DEEPGRAM_API_KEY';
+    case 'local':
+      return 'a local Whisper server (LOCAL_WHISPER_ENDPOINT, no API key)';
+    default: {
+      const _exhaustive: never = name;
+      return String(_exhaustive);
     }
   }
 }
@@ -54,9 +115,9 @@ function constructProvider(name: ProviderName, env: NodeJS.ProcessEnv): AsrProvi
  */
 export function providerFromEnv(env: NodeJS.ProcessEnv = process.env): AsrProvider {
   const raw = (env.ASR_PROVIDER ?? 'sarvam').toLowerCase();
-  // Chain mode resolves to the primary (Sarvam) for callers that expect one provider.
-  const name = (raw === 'sarvam_fallback_elevenlabs' ? 'sarvam' : raw) as ProviderName;
-  if (name !== 'elevenlabs' && name !== 'deepgram' && name !== 'sarvam') {
+  // Chain mode resolves to the primary for callers that expect one provider.
+  const name = primaryProvider(raw);
+  if (!name) {
     throw new AsrError(
       `Unknown ASR_PROVIDER "${raw}"`,
       'registry',
@@ -93,8 +154,7 @@ export function resolveProviderChain(
   }
 
   const mode = raw;
-  const names: ProviderName[] =
-    mode === 'sarvam_fallback_elevenlabs' ? ['sarvam', 'elevenlabs'] : [mode];
+  const names = chainFor(mode);
 
   const providers: AsrProvider[] = [];
   const skipped: string[] = [];
@@ -105,11 +165,7 @@ export function resolveProviderChain(
   }
 
   if (providers.length === 0) {
-    const needed = names.map((n) => {
-      if (n === 'sarvam') return 'SARVAM_API_KEY';
-      if (n === 'elevenlabs') return 'ELEVENLABS_API_KEY';
-      return 'DEEPGRAM_API_KEY';
-    });
+    const needed = names.map((n) => credentialHint(n));
     throw new MissingApiKeyError(
       mode,
       needed.join(' or '),

@@ -85,7 +85,12 @@ export interface LoadEnvResult {
 let loaded: LoadEnvResult | null = null;
 
 /**
- * Load `.env` into `process.env` without clobbering existing values.
+ * Load `.env`, then `.env.local` beside it, without clobbering existing values.
+ *
+ * `.env.local` may override keys that came from `.env`. A value already in
+ * the real environment still wins over both files — that is how `npm run
+ * local:setup` can opt a machine into local ASR without changing the code
+ * default, and without beating a key you exported in the shell.
  *
  * Idempotent: repeated calls return the first result. Pass `force` in tests.
  */
@@ -103,28 +108,52 @@ export function loadEnv(
     if (existsSync(candidate)) { path = candidate; break; }
   }
 
+  // Only the directory that supplied `.env`. Looking further would pull a
+  // developer's project-root `.env.local` into a test that pointed `cwd` at
+  // a temp folder with its own `.env`.
+  let localPath: string | null = null;
+  if (path) {
+    const beside = resolve(dirname(path), '.env.local');
+    if (existsSync(beside)) localPath = beside;
+  } else {
+    for (const dir of searchDirs) {
+      const candidate = resolve(dir, '.env.local');
+      if (existsSync(candidate)) { localPath = candidate; path = candidate; break; }
+    }
+  }
+
   const result: LoadEnvResult = { path, applied: [], skipped: [] };
-  if (!path) {
+  if (!path && !localPath) {
     if (!opts.force) loaded = result;
     return result;
   }
 
-  let parsed: Record<string, string>;
-  try {
-    parsed = parseEnvFile(readFileSync(path, 'utf8'));
-  } catch {
-    // An unreadable .env is not fatal — real env vars may already be set.
-    if (!opts.force) loaded = result;
-    return result;
-  }
+  const originallySet = new Set(
+    Object.entries(env)
+      .filter(([, v]) => v !== undefined && v !== '')
+      .map(([k]) => k),
+  );
 
-  for (const [k, v] of Object.entries(parsed)) {
-    if (env[k] !== undefined && env[k] !== '') {
-      result.skipped.push(k);
+  const files = [path, localPath].filter((p): p is string => Boolean(p));
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    let parsed: Record<string, string>;
+    try {
+      parsed = parseEnvFile(readFileSync(file, 'utf8'));
+    } catch {
+      // An unreadable env file is not fatal — real env vars may already be set.
       continue;
     }
-    env[k] = v;
-    result.applied.push(k);
+    for (const [k, v] of Object.entries(parsed)) {
+      if (originallySet.has(k)) {
+        if (!result.skipped.includes(k)) result.skipped.push(k);
+        continue;
+      }
+      env[k] = v;
+      if (!result.applied.includes(k)) result.applied.push(k);
+    }
   }
 
   if (!opts.force) loaded = result;

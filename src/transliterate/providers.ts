@@ -2,6 +2,7 @@ import { CaptionEngineError } from '../errors.js';
 import { transliterateToken, hasDevanagari } from './devanagari.js';
 import { transliterateKannadaToken, hasKannada } from './kannada.js';
 import { isIndicScript } from './script-utils.js';
+import { LocalLlmTransliterator } from './local-llm.js';
 import {
   planBatches, splitBatchResponse, mapWithConcurrency, subdivide,
   DEFAULT_MAX_BATCH_CHARS, DEFAULT_MAX_BATCH_WORDS, DEFAULT_SEPARATOR, SARVAM_HARD_LIMIT,
@@ -805,7 +806,7 @@ import type { TransliteratorName } from './capabilities.js';
 
 /** Names accepted by --transliterate. 'native' is deliberately absent. */
 export function listTransliterators(): string[] {
-  return ['auto', 'local', 'sarvam', 'http'];
+  return ['auto', 'local', 'local-llm', 'sarvam', 'http'];
 }
 
 /**
@@ -863,7 +864,7 @@ export function resolveTransliterator(
 
   const chosen = (requested === 'auto'
     ? autoSelectTransliterator(env)
-    : requested) as 'local' | 'sarvam' | 'http';
+    : requested) as 'local' | 'local-llm' | 'sarvam' | 'http';
 
   switch (chosen) {
     case 'local': {
@@ -879,6 +880,8 @@ export function resolveTransliterator(
             `  • Use a model backend that covers ${language}:\n` +
             `      export SARVAM_API_KEY=...\n` +
             `      --transliterate sarvam\n` +
+            `  • Or a local LLM (Ollama, no API key):\n` +
+            `      --transliterate local-llm\n` +
             `  • Point at your own service:\n` +
             `      export TRANSLITERATE_URL=https://...\n` +
             `      --transliterate http\n` +
@@ -887,6 +890,9 @@ export function resolveTransliterator(
       }
       return p;
     }
+
+    case 'local-llm':
+      return new LocalLlmTransliterator(env);
 
     case 'sarvam': {
       const key = env.SARVAM_API_KEY;
@@ -938,11 +944,13 @@ export function resolveTransliterator(
       return new HttpTransliterator(url, headers);
     }
 
-    default:
+    default: {
+      const _exhaustive: never = chosen;
       throw new CaptionEngineError(
-        `Unknown transliteration provider "${chosen}".`,
+        `Unknown transliteration provider "${String(_exhaustive)}".`,
         `Valid: ${listTransliterators().join(', ')}`,
       );
+    }
   }
 }
 

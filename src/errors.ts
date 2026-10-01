@@ -87,6 +87,7 @@ export class NoWordTimingsError extends CaptionEngineError {
       `Use a provider that supports word timings:\n` +
         `  --provider elevenlabs   (Scribe v2, word + character timestamps)\n` +
         `  --provider deepgram     (Nova-3)\n` +
+        `  --provider local        (whisper.cpp on this machine, no API key)\n` +
         `Sarvam's REST API returns sentence-level timestamps only and cannot back word-timed captions.`,
     );
   }

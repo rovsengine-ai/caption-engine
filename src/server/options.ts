@@ -284,7 +284,18 @@ export function publicMeta() {
         label: 'Deepgram Nova',
         description: 'Word timings; good Telugu/Kannada coverage.',
       },
+      {
+        value: 'local',
+        label: 'Local Whisper',
+        description: 'whisper.cpp on this machine. Word timestamps, no API key, no cloud.',
+      },
+      {
+        value: 'local_fallback_elevenlabs',
+        label: 'Local Whisper + ElevenLabs Fallback',
+        description: 'Local Whisper first. ElevenLabs Scribe if the local server fails.',
+      },
     ],
     defaultProvider: DEFAULT_PROVIDER_MODE,
+    maxDurationSec: 30,
   };
 }
