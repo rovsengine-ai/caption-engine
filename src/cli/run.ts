@@ -8,7 +8,12 @@ import { CaptionEngineError, InvalidTranscriptError, NoWordTimingsError } from '
 import { probeMedia, assertHasAudio, type MediaInfo } from '../media/probe.js';
 import { extractAudio } from '../media/extract.js';
 import { assertBinary, FFMPEG, FFPROBE } from '../media/ffmpeg.js';
-import { providerFromEnv, assertWordTimings, type AsrProvider } from '../asr/index.js';
+import {
+  resolveProviderChain,
+  transcribeWithFallback,
+  assertWordTimings,
+  DEFAULT_PROVIDER_MODE,
+} from '../asr/index.js';
 import {
   autoTrim, applyTrim, applyHandles, snapCutsToFrames, keepSegments,
   DEFAULT_TRIM_OPTIONS, DEFAULT_CUT_HANDLE_SEC,
@@ -26,6 +31,7 @@ import { groupIntoCues } from '../captions/group.js';
 import { buildAss, buildSrt } from '../captions/ass.js';
 import { planCaptionFrames, renderPlannedFrame } from '../captions/svg.js';
 import { resolveStyle, resolveOutput, STYLE_DEFAULT_ANIMATION_TEMPLATE } from '../captions/style.js';
+import { templateMotionDefault } from '../captions/template.js';
 import {
   ANIMATION_TEMPLATES, resolveIntensity, resolveAnimationTemplateName,
 } from '../captions/animation.js';
@@ -222,6 +228,17 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   log.step(`Inspecting ${basename(inputPath)}`);
   const info: MediaInfo = await probeMedia(inputPath);
   assertHasAudio(info);
+
+  const defaultMaxDurationSec = 30;
+  const maxDurationSec = opts.maxDuration
+    ?? (process.env.MAX_VIDEO_DURATION_SEC ? Number(process.env.MAX_VIDEO_DURATION_SEC) : defaultMaxDurationSec);
+  if (!opts.allowLongVideo && Number.isFinite(maxDurationSec) && maxDurationSec > 0 && info.durationSec > maxDurationSec) {
+    throw new CaptionEngineError(
+      `Video duration (${info.durationSec.toFixed(1)}s) exceeds the ${maxDurationSec}s limit.`,
+      `Currently, video processing is limited to ${maxDurationSec} seconds. Pass --allow-long-video or set MAX_VIDEO_DURATION_SEC to process longer files.`,
+    );
+  }
+
   log.info(
     `${info.kind} · ${info.formatName} · ${info.durationSec.toFixed(1)}s` +
       (info.width ? ` · ${info.width}x${info.height}` : '') +
@@ -251,7 +268,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   // filename cannot silently reuse the previous take's transcript or cuts.
   const inputFp = await fingerprintInput(inputPath, { durationSec: info.durationSec });
   const trConfig = transcriptConfigHash({
-    provider: opts.provider ?? process.env.ASR_PROVIDER ?? 'elevenlabs',
+    provider: opts.provider ?? process.env.ASR_PROVIDER ?? DEFAULT_PROVIDER_MODE,
     language: opts.language,
     codeSwitching: opts.codeSwitching,
     keyterms: collectKeyterms(opts),
@@ -273,7 +290,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
   if (opts.dryRun) {
     log.info('--dry-run: stopping before transcription. Planned work:');
     log.info(`  audio extraction : ${info.hasVideo ? 'yes' : 'yes (re-encode)'}`);
-    log.info(`  provider         : ${opts.provider ?? process.env.ASR_PROVIDER ?? 'elevenlabs'}`);
+    log.info(`  provider         : ${opts.provider ?? process.env.ASR_PROVIDER ?? DEFAULT_PROVIDER_MODE}`);
     log.info(`  language         : ${opts.language ?? 'auto-detect'}`);
     log.info(`  auto trim        : ${opts.autoTrim ? 'yes' : 'no'}`);
     log.info(`  outputs          : ${[
@@ -327,43 +344,58 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     await extractAudio(inputPath, audioPath);
     log.info(`→ ${audioPath}`);
 
-    let provider: AsrProvider;
-    const prevProvider = process.env.ASR_PROVIDER;
-    try {
-      if (opts.provider) process.env.ASR_PROVIDER = opts.provider;
-      provider = providerFromEnv();
-    } finally {
-      if (opts.provider) {
-        if (prevProvider === undefined) delete process.env.ASR_PROVIDER;
-        else process.env.ASR_PROVIDER = prevProvider;
+    const { mode, providers, skipped } = resolveProviderChain(opts.provider);
+    const chainLabel = providers.map((p) => p.name).join(' → ');
+    log.step(
+      providers.length > 1
+        ? `Transcribing with ${chainLabel} (mode: ${mode})`
+        : `Transcribing with ${providers[0]!.name}`,
+    );
+    for (const name of skipped) {
+      log.warn(`Skipping ${name}: API key not set`);
+    }
+    for (const p of providers) {
+      if (!p.supportsWordTimestamps) {
+        log.warn(
+          `${p.name} does not return per-word timestamps` +
+            (providers.length > 1
+              ? ' — will fall back to the next provider if needed.'
+              : '. Word-timed captions will be rejected after transcription.'),
+        );
       }
     }
 
-    log.step(`Transcribing with ${provider.name}`);
-    if (!provider.supportsWordTimestamps) {
-      log.warn(
-        `${provider.name} does not return per-word timestamps. ` +
-          `Word-timed captions will be rejected after transcription.`,
-      );
-    }
     const keyterms = collectKeyterms(opts);
     if (keyterms.length) log.info(`${keyterms.length} keyterm(s) sent to the ASR`);
     if (opts.codeSwitching) {
       log.info('code-switching mode: asking the ASR to keep English in Latin script');
     }
 
-    transcript = await provider.transcribe(readFileSync(audioPath), {
-      language: languageIsAuto ? undefined : opts.language,
-      codeSwitching: opts.codeSwitching,
-      keyterms: keyterms.length ? keyterms : undefined,
-      diarize: false,
-    });
+    transcript = await transcribeWithFallback(
+      providers,
+      readFileSync(audioPath),
+      {
+        language: languageIsAuto ? undefined : opts.language,
+        codeSwitching: opts.codeSwitching,
+        keyterms: keyterms.length ? keyterms : undefined,
+        diarize: false,
+      },
+      {
+        requireWordTimings: true,
+        onFallback: (from, to, reason) => {
+          log.warn(`ASR fallback: ${from} → ${to}. Reason: ${reason}`);
+        },
+      },
+    );
     for (const w of transcript.warnings ?? []) log.warn(w);
     const rawNote =
       transcript.detectedLanguageRaw && transcript.detectedLanguageRaw !== transcript.language
         ? ` (provider returned "${transcript.detectedLanguageRaw}", normalised to ISO-639-1)`
         : '';
-    log.info(`${transcript.words.length} words · detected ${transcript.language}${rawNote}`);
+    log.info(
+      `${transcript.words.length} words · detected ${transcript.language}${rawNote}` +
+        ` · via ${transcript.provider}`,
+    );
   }
 
   try {
@@ -707,7 +739,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
       ...DEFAULT_TRIM_OPTIONS,
       maxSilenceSec: opts.trimSilence,
       removeFillers: !opts.keepFillers,
-      removeFalseStarts: !opts.keepFillers,
+      removeFalseStarts: opts.removeFalseStarts ?? !opts.keepFillers,
       minCutConfidence: opts.minCutConfidence ?? DEFAULT_TRIM_OPTIONS.minCutConfidence,
       audio,
       minFillerDurationSec: opts.minFillerDuration ?? DEFAULT_TRIM_OPTIONS.minFillerDurationSec,
@@ -1065,7 +1097,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           ...(opts.font !== undefined ? { fontFamily: opts.font } : {}),
           ...(opts.activeColor !== undefined ? { activeColor: opts.activeColor } : {}),
           ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
-        });
+        }, { aspect: opts.aspect, preferTemplate: opts.preferTemplate });
         const rows: ProsodyDiagnosticRow[] = prosody.words.map((w) => {
           // Read the decision that actually rendered, not a recomputation.
           // Under --tone-scope cue this is the LINE's tone, which is what the
@@ -1073,7 +1105,9 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
           const a = applied.get(w.index);
           const toneStyle = a?.style;
           const resolved = resolveWordStyle(baseStyle, false, {
-            activeScale: opts.activeScale,
+            activeScale: opts.activeScaleExplicit
+              ? opts.activeScale
+              : (baseStyle.activeWord?.scale ?? opts.activeScale),
             activeBold: opts.activeBold,
             ...(toneStyle ? { tone: toneStyle } : {}),
           });
@@ -1131,7 +1165,10 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     ...(opts.fontSize !== undefined ? { fontSizePx: opts.fontSize } : {}),
     ...(opts.positionY !== undefined ? { positionY: opts.positionY } : {}),
     ...(opts.maxWordsPerCue !== undefined ? { maxWordsPerCue: opts.maxWordsPerCue } : {}),
-  });
+  }, { aspect: opts.aspect, preferTemplate: opts.preferTemplate });
+  const activeScale = opts.activeScaleExplicit
+    ? opts.activeScale
+    : (style.activeWord?.scale ?? opts.activeScale);
 
   // ---- Kinetic captions: resolve ONE template/intensity for the whole
   // ---- render. Not per-cue — reservedWidth (src/captions/svg.ts:layoutCue)
@@ -1155,7 +1192,9 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     ? undefined
     : resolveAnimationTemplateName({
         requested: opts.animationTemplate,
-        stylePresetDefault: STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style],
+        stylePresetDefault: opts.preferTemplate
+          ? (style.animationTemplate ?? templateMotionDefault(opts.style) ?? STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style])
+          : (STYLE_DEFAULT_ANIMATION_TEMPLATE[opts.style] ?? style.animationTemplate ?? templateMotionDefault(opts.style)),
         themeToneTemplates: theme.motion?.toneTemplates,
         tone: videoTone?.tone,
         toneConfidence: videoTone?.share,
@@ -1191,7 +1230,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
         video: { width, height },
         style,
         highlight: opts.highlight === 'none' ? 'none' : 'active-word',
-        activeScale: opts.activeScale,
+        activeScale,
         activeBold: opts.activeBold,
       }),
       'utf8',
@@ -1278,7 +1317,7 @@ export async function runPipeline(opts: CliOptions, log: Reporter): Promise<RunR
     // peak memory flat regardless of length.
     const svgOpts = {
       width, height, style,
-      activeScale: opts.activeScale,
+      activeScale,
       activeBold: opts.activeBold,
       highlight: opts.highlight,
       // undefined unless --prosody ran, which is what keeps the default path

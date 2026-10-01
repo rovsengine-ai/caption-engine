@@ -151,19 +151,46 @@ async function tryShapeWith(
   return { glyphs, width: penX };
 }
 
+export interface ShapeOptions {
+  bold?: boolean;
+  fontPath?: string;
+  fontFamily?: string;
+  /** Absolute font file per script. Used before the family / registry lookup. */
+  fontsByScript?: Partial<Record<ScriptName, string>>;
+  /**
+   * When false, a missing glyph throws instead of trying another face.
+   * Default true — the historical shaper walks fallbacks so a rare conjunct
+   * can still render. Template validation sets this false on purpose.
+   */
+  allowFallback?: boolean;
+}
+
 /** Shape one single-script run. */
 async function shapeRun(
   text: string,
   script: ScriptName,
   fontSize: number,
-  opts: { bold?: boolean; fontPath?: string; fontFamily?: string },
+  opts: ShapeOptions,
 ): Promise<ShapedRun> {
   const H = await hb();
+  const scriptFont = opts.fontsByScript?.[script];
   const primary = resolveFont(script, {
-    bold: opts.bold, override: opts.fontPath, family: opts.fontFamily,
+    bold: opts.bold, override: opts.fontPath ?? scriptFont, family: opts.fontFamily,
   });
+  const allowFallback = opts.allowFallback !== false;
   const selected = discoverFontFamilies().find((f) => f.regular === primary.path || f.bold === primary.path);
   const candidates: ResolvedFont[] = [primary];
+  if (!allowFallback) {
+    const handles = await loadFont(primary);
+    const shaped = await tryShapeWith(H, handles, text);
+    if (shaped) return { glyphs: shaped.glyphs, script, font: primary, handles, width: shaped.width };
+    const snippet = text.length > 40 ? `${text.slice(0, 40)}…` : text;
+    throw new ShapingError(
+      `Could not render the ${script} text "${snippet}" with ${primary.path} — the face has no glyph for part of it (.notdef).`,
+      `This font was named explicitly and fallback is disabled, so a different face will not be substituted.\n` +
+        `Point the template's scriptFallbacks.${script} at a vendored Noto file that covers the script.`,
+    );
+  }
   // Shape the full script run with a fallback candidate, never individual
   // codepoints: splitting a conjunct or Arabic joining run would corrupt it.
   // We only try this after the selected face produced .notdef.
@@ -218,7 +245,7 @@ async function shapeRun(
 export async function shapeText(
   text: string,
   fontSize: number,
-  opts: { bold?: boolean; fontPath?: string; fontFamily?: string } = {},
+  opts: ShapeOptions = {},
 ): Promise<ShapedText> {
   // Fail fast and clearly here, before an invalid size reaches HarfBuzz/SVG
   // path scaling — where the same bad value shows up many steps later as an

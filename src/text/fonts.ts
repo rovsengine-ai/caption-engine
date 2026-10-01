@@ -41,6 +41,23 @@ const BOLD_SUFFIX: Record<string, string> = {
   '-Regular': '-Bold',
 };
 
+export function vendoredFontDir(): string {
+  return assetFontDir();
+}
+
+/**
+ * Resolve a font file shipped in assets/fonts by its filename
+ * (`NotoSansDevanagari_400Regular.ttf`). Returns null when it is not vendored.
+ * Does not search system fonts — a template that names a missing file must fail.
+ */
+export function vendoredFontFile(fileName: string): string | null {
+  const base = fileName.split(/[\\/]/).pop() || fileName;
+  const direct = join(assetFontDir(), base);
+  if (existsSync(direct)) return direct;
+  const hit = allFontFiles().find((p) => fontBasename(p).toLowerCase() === base.toLowerCase());
+  return hit ?? null;
+}
+
 function assetFontDir(): string {
   // dist/src/text/ → repo root, and src/text/ when run from source.
   for (const up of ['../../../assets/fonts', '../../assets/fonts', '../assets/fonts']) {

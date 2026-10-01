@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { rmSync, existsSync } from 'node:fs';
 import { parseArgs, printHelp } from './cli/args.js';
+import { runTemplatesCommand } from './captions/template.js';
 import { runDoctor, formatDoctor, isBlocking } from './cli/doctor.js';
 import { fontTable } from './text/fonts.js';
 import { runPipeline, type Reporter } from './cli/run.js';
@@ -104,6 +105,9 @@ async function main(): Promise<number> {
   if (parsed.command === 'fonts') {
     process.stdout.write(fontTable() + '\n');
     return 0;
+  }
+  if (parsed.command === 'templates') {
+    return runTemplatesCommand(parsed.args);
   }
   if (parsed.command === 'doctor') {
     const results = await runDoctor();

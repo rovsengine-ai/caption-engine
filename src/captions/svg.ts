@@ -1,4 +1,6 @@
 import type { CaptionCue, CaptionStyle, Word } from '../types.js';
+import type { ShapeOptions } from '../text/shaper.js';
+import type { ScriptName } from '../text/script.js';
 import { shapeText, shapedToSvgRuns, type ShapedText } from '../text/shaper.js';
 import { primaryScript, isRtlScript } from '../text/script.js';
 import { activeWordWindows, resolveWordStyle } from './active.js';
@@ -110,6 +112,20 @@ function activeScaleHeadroom(widths: number[], activeScale: number): number {
 }
 
 /**
+ * Font files named by a data template. Omitted for legacy presets, which is
+ * what keeps their shaping path identical to the pre-template renderer.
+ */
+function shapingOpts(style: CaptionStyle, bold: boolean, fontFamily?: string): ShapeOptions {
+  const base: ShapeOptions = { bold, ...(fontFamily ? { fontFamily } : {}) };
+  if (!style.fontFallbacks) return base;
+  return {
+    ...base,
+    fontsByScript: style.fontFallbacks as Partial<Record<ScriptName, string>>,
+    allowFallback: false,
+  };
+}
+
+/**
  * Lay out a cue into lines that fit the frame.
  *
  * Wrapping is by MEASURED PIXEL WIDTH, not character count. Character counting
@@ -120,10 +136,13 @@ export async function layoutCue(
   cue: CaptionCue,
   opts: SvgRenderOptions,
 ): Promise<LaidOutLine[]> {
-  const { style, width, maxLines = 2 } = opts;
+  const { style, width } = opts;
+  const maxLines = opts.maxLines ?? style.maxLines ?? 2;
   const bold = !opts.activeBold;
   const fontSize = style.fontSizePx;
-  const maxWidth = width * 0.86; // side margins
+  const maxWidth = style.safeMargins
+    ? width * (1 - style.safeMargins.left - style.safeMargins.right)
+    : width * 0.86; // side margins
   const baseSp = await spaceWidth(fontSize, bold);
   // Fixed for the whole render (see SvgRenderOptions.motion) — the peak an
   // animated word can EVER scale to, so its reserved slot never runs out
@@ -141,14 +160,12 @@ export async function layoutCue(
     const perWord = { ...opts, ...(tone ? { tone } : {}) };
     const resting = resolveWordStyle(style, false, perWord);
     const active = resolveWordStyle(style, true, perWord);
-    const shaped = await shapeText(text, fontSize, {
-      bold: resting.bold, fontFamily: resting.fontFamily,
-    });
+    const shaped = await shapeText(text, fontSize, shapingOpts(style, resting.bold, resting.fontFamily));
     // Reserve the widest state this word can ever occupy. Layout is then
     // identical for every frame of the cue, which is what stops the line from
     // jumping as the highlight moves across it.
     const restingWidth = shaped.width * resting.scale;
-    const activeWidth = await measureForActive(text, fontSize, active);
+    const activeWidth = await measureForActive(text, fontSize, active, style);
     // The third term covers a kinetic entrance/emphasis overshoot (e.g. "pop"
     // templates scale past their settled size before easing back) — without
     // it an animated word could momentarily exceed the space every OTHER
@@ -191,7 +208,7 @@ export async function layoutCue(
   }
 
   // Position each line: centred horizontally, stacked from the anchor.
-  const lineHeight = fontSize * 1.38; // Tamil/Malayalam stack tall; 1.28 collided
+  const lineHeight = fontSize * (style.lineSpacing ?? 1.38); // Tamil/Malayalam stack tall; 1.28 collided
   const totalH = lines.length * lineHeight;
   const anchorY = opts.height * style.positionY;
   const startY = anchorY - totalH / 2 + fontSize * 0.5;
@@ -262,6 +279,21 @@ export async function renderCueSvg(
     if (parts.length > 0) cueAttrs = ` ${parts.join(' ')}`;
   }
 
+  if (style.backgroundBox) {
+    const box = style.backgroundBox;
+    for (const line of lines) {
+      if (line.words.length === 0) continue;
+      const minX = Math.min(...line.words.map((w) => w.x)) - box.paddingPx;
+      const maxX = Math.max(...line.words.map((w) => w.x + w.reservedWidth)) + box.paddingPx;
+      const y = line.y - style.fontSizePx * 0.92 - box.paddingPx;
+      const h = style.fontSizePx * 1.25 + box.paddingPx * 2;
+      decorations.push(
+        `<rect x="${minX.toFixed(1)}" y="${y.toFixed(1)}" width="${(maxX - minX).toFixed(1)}" ` +
+          `height="${h.toFixed(1)}" rx="${box.borderRadiusPx.toFixed(1)}" fill="${esc(box.color)}"/>`,
+      );
+    }
+  }
+
   for (const line of lines) {
     for (const lw of line.words) {
       const isActive = lw.index === activeIdx;
@@ -280,9 +312,7 @@ export async function renderCueSvg(
       const shaped =
         finalStyle.bold === resting.bold && finalStyle.fontFamily === resting.fontFamily
           ? lw.shaped
-          : await shapeText(text, style.fontSizePx, {
-              bold: finalStyle.bold, fontFamily: finalStyle.fontFamily,
-            });
+          : await shapeText(text, style.fontSizePx, shapingOpts(style, finalStyle.bold, finalStyle.fontFamily));
       const runs = shapedToSvgRuns(shaped);
       if (runs.length === 0) continue;
       const colour = finalStyle.color;
@@ -323,6 +353,18 @@ export async function renderCueSvg(
             height: (shaped.ascent + shaped.descent) * totalScale * 1.18,
           }
         : null;
+
+      const activeBox = isActive ? style.activeWord?.backgroundBox : undefined;
+      if (activeBox) {
+        const bx = left - activeBox.paddingPx;
+        const by = baselineY - shaped.ascent * totalScale - activeBox.paddingPx;
+        const bw = shaped.width * totalScale + activeBox.paddingPx * 2;
+        const bh = (shaped.ascent + shaped.descent) * totalScale + activeBox.paddingPx * 2;
+        decorations.push(
+          `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" ` +
+            `height="${bh.toFixed(1)}" rx="${activeBox.borderRadiusPx.toFixed(1)}" fill="${esc(activeBox.color)}"/>`,
+        );
+      }
 
       if (wordMotion?.decoration.backplate && decoBox) {
         const rx = Math.min(decoBox.height / 2.4, decoBox.width / 6);
@@ -373,6 +415,14 @@ export async function renderCueSvg(
             `<path d="${r.d}" transform="${runTransform}" fill="none" ` +
               `stroke="${esc(colour)}" stroke-width="${glowW.toFixed(1)}" ` +
               `stroke-linejoin="round" stroke-linecap="round" opacity="0.28"/>`,
+          );
+        }
+        if (style.shadow) {
+          const sh = style.shadow;
+          const shadowOpacity = sh.blur > 8 ? 0.35 : 0.45;
+          decorations.push(
+            `<path d="${r.d}" transform="translate(${sh.offsetX.toFixed(1)},${sh.offsetY.toFixed(1)}) ${runTransform}" ` +
+              `fill="${esc(sh.color)}" opacity="${shadowOpacity}"/>`,
           );
         }
         if (wordMotion?.decoration.shadow) {
@@ -565,8 +615,9 @@ async function measureForActive(
   text: string,
   fontSize: number,
   active: ReturnType<typeof resolveWordStyle>,
+  style: CaptionStyle,
 ): Promise<number> {
-  const width = await shapeText(text, fontSize, { bold: active.bold, fontFamily: active.fontFamily });
+  const width = await shapeText(text, fontSize, shapingOpts(style, active.bold, active.fontFamily));
   return width.width * active.scale;
 }
 

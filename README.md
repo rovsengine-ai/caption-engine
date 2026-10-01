@@ -1,7 +1,46 @@
+---
+title: Caption Engine
+emoji: 🎬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
 # caption-engine
 
 Word-timed captions, Auto Trim and clip finding for Indic and Hinglish video.
-TypeScript + FFmpeg. No web framework, no cloud service required beyond the ASR provider.
+TypeScript + FFmpeg. CLI locally, or the free **Hugging Face Spaces** web UI (Docker).
+
+## Web UI (Hugging Face Spaces)
+
+FluxoCut-inspired product surface in `public/`:
+
+| Route | What you get |
+|---|---|
+| `/` | Marketing site — languages, templates, Auto Trim, pricing, plugins, creators |
+| `/app` | Upload workspace (in-memory `File` only — **no** browser storage) |
+| `/app/p/:jobId` | Multi-track editor — cues, templates, Auto Trim restore, export |
+
+Pipeline defaults to **Sarvam AI → ElevenLabs Scribe** fallback. Auto Trim supports Light / Balanced / Strong / Max aggression plus per-cut restore via `PATCH /api/jobs/:id/cuts/:cutId`. Server temps clean up in `try…finally` / job TTL.
+
+### Run locally
+
+```bash
+npm install
+npm run fonts:install   # once, if assets/fonts is empty
+# Set SARVAM_API_KEY and ELEVENLABS_API_KEY (see .env.example)
+npm run web             # http://0.0.0.0:7860
+```
+
+### Deploy on Hugging Face Spaces
+
+1. Create a new Space → **Docker** SDK.
+2. Push this repository (or connect the GitHub repo).
+3. In Space **Settings → Variables and secrets**, add `SARVAM_API_KEY` and `ELEVENLABS_API_KEY` (default `ASR_PROVIDER=sarvam_fallback_elevenlabs`). Optional: `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY` (off-topic / visual trim).
+4. The `Dockerfile` installs FFmpeg/ffprobe, fonts, builds TypeScript, and starts `node dist/src/server.js` on port **7860** as user `1000`.
+
+## CLI
 
 ```bash
 npm install
@@ -27,11 +66,26 @@ Sarvam with English protected, runs Auto Trim, renders portrait with the bold st
 writes `outputs/my-video-hinglish.mp4`. Paths with spaces work — quote them.
 See [Windows and macOS setup](#windows-and-macos-setup).
 
+## Local AI (zero cloud)
+
+On Apple Silicon the same pipeline can run with no ASR or transliteration API.
+whisper.cpp (Metal) supplies word timestamps; Ollama romanises Indic script to
+natural Hinglish. Cloud providers stay available, and the default provider is
+still Sarvam → ElevenLabs until you opt in.
+
+```bash
+npm run local:setup
+npm run local:start
+node dist/src/cli.js my-video.mp4 --provider local --script roman --transliterate local-llm --auto-trim -o outputs/my-video-local.mp4
+```
+
+Setup, models, and troubleshooting: [docs/LOCAL-AI.md](docs/LOCAL-AI.md).
+
 ## What it does
 
 - **Input**: MP4, MOV, MKV, WebM, AVI, M4V, MPG, WMV, FLV, TS · WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, AIFF, CAF
 - Audio is extracted automatically (16 kHz mono) before transcription — never uploads the video
-- **Word-level timestamps** from ElevenLabs Scribe v2 or Deepgram Nova-3
+- **Word-level timestamps** from ElevenLabs Scribe v2, Deepgram Nova-3, or local whisper.cpp
 - **13 languages with verified rendering**, native script or the option of Roman/Hinglish output
 - **Auto Trim**: silences, filler words, false starts — every cut reviewable and restorable
 - **Exports**: burned-in MP4, SRT, ASS, JSON

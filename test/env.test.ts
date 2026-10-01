@@ -105,6 +105,20 @@ describe('.env loading', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
+  test('.env.local overrides .env but not a value already in the environment', () => {
+    const dir = tmp();
+    try {
+      writeFileSync(join(dir, '.env'), 'CE_TEST_SHELL=fromenv\nCE_TEST_FILE=fromenv\n');
+      writeFileSync(join(dir, '.env.local'), 'CE_TEST_SHELL=fromlocal\nCE_TEST_FILE=fromlocal\nCE_TEST_ONLY=local\n');
+      const env = { CE_TEST_SHELL: 'fromshell' } as NodeJS.ProcessEnv;
+      const r = loadEnv({ cwd: dir, env, force: true });
+      assert.equal(env.CE_TEST_SHELL, 'fromshell');
+      assert.equal(env.CE_TEST_FILE, 'fromlocal');
+      assert.equal(env.CE_TEST_ONLY, 'local');
+      assert.ok(r.skipped.includes('CE_TEST_SHELL'));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test('the result reports NAMES only, never values', () => {
     const dir = tmp();
     try {

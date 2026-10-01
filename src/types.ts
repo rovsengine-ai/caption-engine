@@ -182,6 +182,40 @@ export interface CaptionCue {
   text: string;
 }
 
+/** Drop shadow compiled from a caption template. Absent on legacy presets. */
+export interface CaptionShadow {
+  color: string;
+  /** Blur radius in pixels at the target frame. The renderer approximates this
+   *  with an offset fill — resvg filter blur is not on the verified path. */
+  blur: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+/** Rounded pill or band behind caption text. Absent on legacy presets. */
+export interface CaptionBackgroundBox {
+  color: string;
+  paddingPx: number;
+  borderRadiusPx: number;
+}
+
+/** Normalised insets, each 0..1 of the frame. */
+export interface CaptionSafeMargins {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/** Active-word overrides compiled from a template. Colour is also copied onto
+ *  `activeColor` so the existing highlighter keeps working. */
+export interface CaptionActiveWordStyle {
+  color?: string;
+  scale?: number;
+  fontWeight?: number;
+  backgroundBox?: CaptionBackgroundBox;
+}
+
 export interface CaptionStyle {
   fontFamily: string;
   fontSizePx: number;
@@ -196,6 +230,20 @@ export interface CaptionStyle {
   maxWordsPerCue: number;
   /** Max characters per line before wrapping. */
   maxCharsPerLine: number;
+  /** Optional template extensions. Legacy presets leave every one of these unset,
+   *  which is what keeps their SVG output identical to the pre-template renderer. */
+  fontWeight?: number;
+  lineSpacing?: number;
+  maxLines?: number;
+  shadow?: CaptionShadow;
+  backgroundBox?: CaptionBackgroundBox;
+  activeWord?: CaptionActiveWordStyle;
+  safeMargins?: CaptionSafeMargins;
+  /** Absolute font file per Unicode script. When set, shaping uses these files
+   *  and refuses to fall back to a face that was not named. */
+  fontFallbacks?: Readonly<Record<string, string>>;
+  animationTemplate?: string;
+  motionIntensity?: number;
 }
 
 // ---------------------------------------------------------------------------

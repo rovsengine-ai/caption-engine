@@ -1,0 +1,79 @@
+{
+  "scriptFallbacks": {
+    "Latin": "NotoSans_400Regular.ttf",
+    "Devanagari": "NotoSansDevanagari_400Regular.ttf",
+    "Telugu": "NotoSansTelugu_400Regular.ttf",
+    "Kannada": "NotoSansKannada_400Regular.ttf",
+    "Tamil": "NotoSansTamil_400Regular.ttf",
+    "Malayalam": "NotoSansMalayalam_400Regular.ttf",
+    "Bengali": "NotoSansBengali_400Regular.ttf",
+    "Gujarati": "NotoSansGujarati_400Regular.ttf",
+    "Gurmukhi": "NotoSansGurmukhi_400Regular.ttf",
+    "Odia": "NotoSansOriya_400Regular.ttf",
+    "Arabic": "NotoNastaliqUrdu_400Regular.ttf",
+    "Common": "NotoSans_400Regular.ttf"
+  },
+  "safeMargins": {
+    "portrait": {
+      "top": 0.12,
+      "bottom": 0.22,
+      "left": 0.06,
+      "right": 0.06
+    },
+    "landscape": {
+      "top": 0.08,
+      "bottom": 0.12,
+      "left": 0.05,
+      "right": 0.05
+    },
+    "square": {
+      "top": 0.1,
+      "bottom": 0.16,
+      "left": 0.06,
+      "right": 0.06
+    }
+  },
+  "id": "karaoke",
+  "name": "Karaoke",
+  "description": "Word-by-word active pill behind the word being spoken.",
+  "aliases": [
+    "karaoke-pill"
+  ],
+  "typography": {
+    "fontFamily": "Noto Sans",
+    "fontSizePx": 66,
+    "fontWeight": 700,
+    "lineSpacing": 1.42,
+    "textCase": "none",
+    "maxWordsPerCue": 6,
+    "maxCharsPerLine": 28,
+    "maxLines": 2
+  },
+  "colors": {
+    "fill": "#FFFFFF",
+    "stroke": {
+      "color": "#00120A",
+      "widthRatio": 0.04
+    },
+    "shadow": {
+      "color": "#000000",
+      "blur": 4,
+      "offsetX": 0,
+      "offsetY": 2
+    }
+  },
+  "activeWord": {
+    "color": "#102010",
+    "scale": 1.04,
+    "fontWeight": 700,
+    "backgroundBox": {
+      "color": "#00E676",
+      "paddingPx": 10,
+      "borderRadiusPx": 14
+    }
+  },
+  "motionDefault": {
+    "animation": "karaoke-sweep",
+    "intensity": "subtle"
+  }
+}

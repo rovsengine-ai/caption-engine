@@ -10,6 +10,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/server.js",
+    "web": "npm run build && node dist/src/server.js",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "test:render": "npm run build && node --test \"dist/test/render-integration.test.js\"",
     "cli": "node dist/src/cli.js",
@@ -17,6 +19,9 @@
     "demo": "npm run build && node dist/demo/pipeline.js",
     "visual": "npm run build && node dist/demo/visual-check.js",
     "caption:hinglish": "node scripts/caption-hinglish.mjs",
+    "local:setup": "bash scripts/setup-local-ai.sh",
+    "local:start": "bash scripts/start-local-ai.sh",
+    "local:status": "bash scripts/local-status.sh",
     "fonts:install": "node scripts/install-fonts.mjs",
     "shaping:probe": "python3 tools/shaping_probe.py",
     "test:raster": "npm run build && node --test \"dist/test/rasteriser.test.js\"",
@@ -24,13 +29,17 @@
     "evaluate": "npm run build && node dist/tools/evaluate.js"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
     "@types/node": "^22.20.1",
     "@types/opentype.js": "^1.3.10",
     "typescript": "^5.7.0"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
+    "express": "^5.2.1",
     "harfbuzzjs": "^1.5.0",
+    "multer": "^2.4.0",
     "opentype.js": "^2.0.0"
   },
   "bin": {

@@ -1,5 +1,10 @@
 import type { CaptionStyle } from '../types.js';
 import { CaptionEngineError } from '../errors.js';
+import {
+  compileTemplateToStyle,
+  getTemplate,
+  listTemplateIds,
+} from './template.js';
 
 /**
  * Caption styles and output presets.
@@ -199,34 +204,73 @@ export function assertValidFontSize(px: number, flag = '--font-size'): void {
   }
 }
 
+export interface ResolveStyleContext {
+  /** Which safe-margin set a data template should compile with. */
+  aspect?: AspectPreset;
+  /**
+   * When true, a data template wins over a legacy preset of the same name
+   * (`minimal`, `neon`, `classic`). The five preset names otherwise stay on
+   * the preset path so existing renders do not change.
+   */
+  preferTemplate?: boolean;
+}
+
+function inferAspect(frameHeight: number): AspectPreset {
+  return frameHeight >= 1600 ? 'portrait' : 'landscape';
+}
+
 /**
  * Build a concrete style, scaling size and outline to the output height so a
  * preset designed at 1080p stays proportionate at 4K.
+ *
+ * Legacy preset names resolve through `STYLE_PRESETS` and return the same
+ * object they always have. Any other name is a data template id (or alias).
  */
 export function resolveStyle(
   presetName: string,
   frameHeight: number,
   overrides: Partial<CaptionStyle> = {},
+  context: ResolveStyleContext = {},
 ): CaptionStyle {
-  const preset = STYLE_PRESETS[presetName];
-  if (!preset) {
-    throw new CaptionEngineError(
-      `Unknown style preset "${presetName}".`,
-      `Available styles: ${listStylePresets().join(', ')}\n` +
-        `Example:  --style bold`,
-    );
-  }
   if (overrides.fontSizePx !== undefined) {
     assertValidFontSize(overrides.fontSizePx);
   }
-  const base = { ...DEFAULT_STYLE, ...preset };
-  const scale = frameHeight / 1920;
-  return {
-    ...base,
-    fontSizePx: Math.round(base.fontSizePx * scale),
-    outlineWidthPx: Math.max(1, Math.round(base.outlineWidthPx * scale)),
-    ...overrides,
-  };
+  const preset = STYLE_PRESETS[presetName];
+  const usePreset = preset !== undefined && !context.preferTemplate;
+  if (usePreset) {
+    const base = { ...DEFAULT_STYLE, ...preset };
+    const scale = frameHeight / 1920;
+    return {
+      ...base,
+      fontSizePx: Math.round(base.fontSizePx * scale),
+      outlineWidthPx: Math.max(1, Math.round(base.outlineWidthPx * scale)),
+      ...overrides,
+    };
+  }
+  const template = getTemplate(presetName);
+  if (template) {
+    return {
+      ...compileTemplateToStyle(template, context.aspect ?? inferAspect(frameHeight), frameHeight),
+      ...overrides,
+    };
+  }
+  if (preset) {
+    const base = { ...DEFAULT_STYLE, ...preset };
+    const scale = frameHeight / 1920;
+    return {
+      ...base,
+      fontSizePx: Math.round(base.fontSizePx * scale),
+      outlineWidthPx: Math.max(1, Math.round(base.outlineWidthPx * scale)),
+      ...overrides,
+    };
+  }
+  throw new CaptionEngineError(
+    `Unknown style preset "${presetName}".`,
+    `Available styles: ${listStylePresets().join(', ')}\n` +
+      `Templates: ${listTemplateIds().join(', ')}\n` +
+      `Example:  --style bold\n` +
+      `          --template bold-social`,
+  );
 }
 
 /** Resolve `--aspect`, using the source dimensions for 'original'. */

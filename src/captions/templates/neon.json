@@ -1,0 +1,74 @@
+{
+  "scriptFallbacks": {
+    "Latin": "NotoSans_400Regular.ttf",
+    "Devanagari": "NotoSansDevanagari_400Regular.ttf",
+    "Telugu": "NotoSansTelugu_400Regular.ttf",
+    "Kannada": "NotoSansKannada_400Regular.ttf",
+    "Tamil": "NotoSansTamil_400Regular.ttf",
+    "Malayalam": "NotoSansMalayalam_400Regular.ttf",
+    "Bengali": "NotoSansBengali_400Regular.ttf",
+    "Gujarati": "NotoSansGujarati_400Regular.ttf",
+    "Gurmukhi": "NotoSansGurmukhi_400Regular.ttf",
+    "Odia": "NotoSansOriya_400Regular.ttf",
+    "Arabic": "NotoNastaliqUrdu_400Regular.ttf",
+    "Common": "NotoSans_400Regular.ttf"
+  },
+  "safeMargins": {
+    "portrait": {
+      "top": 0.12,
+      "bottom": 0.22,
+      "left": 0.06,
+      "right": 0.06
+    },
+    "landscape": {
+      "top": 0.08,
+      "bottom": 0.12,
+      "left": 0.05,
+      "right": 0.05
+    },
+    "square": {
+      "top": 0.1,
+      "bottom": 0.16,
+      "left": 0.06,
+      "right": 0.06
+    }
+  },
+  "id": "neon",
+  "name": "Neon",
+  "description": "Vibrant cyan and magenta glow with an expressive colour shift on the active word.",
+  "aliases": [
+    "neon-glow"
+  ],
+  "typography": {
+    "fontFamily": "Noto Sans",
+    "fontSizePx": 78,
+    "fontWeight": 700,
+    "lineSpacing": 1.4,
+    "textCase": "none",
+    "maxWordsPerCue": 4,
+    "maxCharsPerLine": 20,
+    "maxLines": 2
+  },
+  "colors": {
+    "fill": "#FFFFFF",
+    "stroke": {
+      "color": "#FF2BD6",
+      "widthRatio": 0.05
+    },
+    "shadow": {
+      "color": "#00E5FF",
+      "blur": 16,
+      "offsetX": 0,
+      "offsetY": 0
+    }
+  },
+  "activeWord": {
+    "color": "#00E5FF",
+    "scale": 1.08,
+    "fontWeight": 700
+  },
+  "motionDefault": {
+    "animation": "neon-pulse",
+    "intensity": "expressive"
+  }
+}

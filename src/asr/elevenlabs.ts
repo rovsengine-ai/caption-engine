@@ -4,9 +4,10 @@ import { normaliseLanguageCode } from '../config/language-codes.js';
 import { AsrError, type AsrProvider, type TranscribeOptions } from './types.js';
 
 /**
- * ElevenLabs Scribe v2 — the recommended primary provider.
+ * ElevenLabs Scribe v2 — the word-timing fallback (and a strong standalone option).
  *
- * Why this one:
+ * Default pipeline mode is Sarvam → ElevenLabs (`sarvam_fallback_elevenlabs`).
+ * Use this provider directly when you need guaranteed per-word timestamps:
  *  - Returns real per-word timestamps (`timestamps_granularity: "word"`).
  *  - 2026 Indic code-switch fix: English words inside Hindi/Telugu/Kannada audio
  *    stay in Latin script instead of being mangled into Devanagari. This is the
